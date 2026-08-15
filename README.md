@@ -34,10 +34,8 @@ dsh plugin --profile web add github:TYEclipse/dsh-netdoctor
 dsh plugin --profile web add github:TYEclipse/dsh-netdoctor#v0.1.0
 ```
 
-The first git-hosted install builds the package from source via its `prepare`
-script; pnpm ≥10 blocks build scripts of new git dependencies until allowed —
-follow dsh's hint (add the package key under `allowBuilds` in the profile's
-`pnpm-workspace.yaml`, then re-run).
+The build output (`dist/`) is committed to this repository, so git-hosted
+installs work with a single command — no build step, no approval prompts.
 
 Or install it through the DSH web GUI plugin browser / any dsh plugin marketplace by searching `dsh-netdoctor` (topic `dsh-plugin`).
 
