@@ -85,7 +85,7 @@ export interface WhoisResult {
   rawTruncated: boolean
   summary: WhoisSummary
   /** Set when the lookup failed; raw/summary are then empty. */
-  error: string | undefined
+  error?: string
 }
 
 /**
@@ -221,13 +221,14 @@ export async function whoisLookup(domainInput: string, server: string | undefine
 
   const build = (used: string, raw: string, error?: string): WhoisResult => {
     const rawTruncated = raw.length > RAW_CAP
+    // NB: `error` is only attached when present — a live `error: undefined`
+    // key fails the dsh-tools lossless-JSON output gate (R7 discipline).
     const result: WhoisResult = {
       domain,
       server: used,
       raw: rawTruncated ? raw.slice(0, RAW_CAP) : raw,
       rawTruncated,
       summary: parseWhoisSummary(raw),
-      error: undefined,
     }
     if (error !== undefined) result.error = error
     return result

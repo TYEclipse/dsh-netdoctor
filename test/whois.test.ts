@@ -8,6 +8,20 @@ import type { AddressInfo, Server } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { fallbackWhoisServer, parseIanaReferral, parseWhoisSummary, rawWhoisQuery, tldOf, whoisLookup } from '../src/whois.ts'
 
+/**
+ * Walk a result tree and assert no live `undefined` values exist — the
+ * dsh-tools output gate rejects any key whose value is undefined even when
+ * JSON.stringify would silently drop it (lossless-JSON discipline, R7).
+ */
+function assertNoUndefined(value: unknown, path = 'root'): void {
+  if (value === undefined) throw new Error(`undefined value at ${path}`)
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoUndefined(item, `${path}[${index}]`))
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) assertNoUndefined(item, `${path}.${key}`)
+  }
+}
+
 const COM_FIXTURE = [
   '   Domain Name: EXAMPLE.COM',
   '   Registry Domain ID: 2336799_DOMAIN_COM-VRSN',
@@ -156,9 +170,19 @@ describe('whoisLookup', () => {
     expect(result.raw).toBe('')
     expect(result.rawTruncated).toBe(false)
     expect(result.summary.statuses).toEqual([])
+    assertNoUndefined(result)
   })
 
   it('rejects invalid domain input', async () => {
     await expect(whoisLookup('not a domain!!', undefined, 2_000)).rejects.toThrow()
+  })
+
+  it('never leaves live undefined values on success results either', () => {
+    // Guard on the shape produced by `build`: every optional field must be
+    // absent (not undefined) when missing.
+    const text = 'No match for "ZZZZZZZZ.COM".'
+    const parsed = parseWhoisSummary(text)
+    expect(parsed.registrar).toBeUndefined()
+    assertNoUndefined(parsed)
   })
 })
