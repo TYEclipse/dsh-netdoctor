@@ -42,7 +42,7 @@ export interface WhoisResult {
     rawTruncated: boolean;
     summary: WhoisSummary;
     /** Set when the lookup failed; raw/summary are then empty. */
-    error: string | undefined;
+    error?: string;
 }
 /**
  * Open a raw TCP connection to a WHOIS server on port 43 (configurable for

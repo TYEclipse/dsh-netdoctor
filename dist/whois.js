@@ -189,13 +189,14 @@ export async function whoisLookup(domainInput, server, timeoutMs) {
     const explicit = server !== undefined && server.trim() !== '' ? server.trim() : undefined;
     const build = (used, raw, error) => {
         const rawTruncated = raw.length > RAW_CAP;
+        // NB: `error` is only attached when present — a live `error: undefined`
+        // key fails the dsh-tools lossless-JSON output gate (R7 discipline).
         const result = {
             domain,
             server: used,
             raw: rawTruncated ? raw.slice(0, RAW_CAP) : raw,
             rawTruncated,
             summary: parseWhoisSummary(raw),
-            error: undefined,
         };
         if (error !== undefined)
             result.error = error;
