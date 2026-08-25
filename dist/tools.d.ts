@@ -14,7 +14,8 @@ export interface ToolSet {
     check_tls: ToolDefinition;
     trace_route: ToolDefinition;
     my_ip: ToolDefinition;
+    whois: ToolDefinition;
 }
-/** Build all six tool definitions from the resolved config. */
+/** Build all seven tool definitions from the resolved config. */
 export declare function buildNetdoctorTools(config: ResolvedConfig): ToolSet;
 //# sourceMappingURL=tools.d.ts.map

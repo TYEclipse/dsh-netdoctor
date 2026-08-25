@@ -1,7 +1,7 @@
 {
   "name": "dsh-netdoctor",
-  "version": "0.1.0",
-  "description": "Network diagnostics toolbox for DeepSeek Harness (dsh): DNS lookup, ICMP ping, TCP port check, TLS certificate check, traceroute, and public IP info — zero runtime dependencies",
+  "version": "0.2.0",
+  "description": "Network diagnostics toolbox for DeepSeek Harness (dsh): DNS lookup (A/AAAA/CNAME/MX/TXT/NS/SOA/SRV/PTR/CAA), ICMP ping, TCP port check, TLS certificate check, traceroute, WHOIS registry lookup, and public IP info — zero runtime dependencies",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -26,7 +26,9 @@
     "dns",
     "ping",
     "traceroute",
-    "tls"
+    "tls",
+    "whois",
+    "caa"
   ],
   "license": "MIT",
   "repository": {

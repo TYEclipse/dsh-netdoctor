@@ -1,27 +1,29 @@
 # dsh-netdoctor 🩺
 
-Network diagnostics toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) — six read-only probes, **zero runtime dependencies** (Node.js built-ins only).
+Network diagnostics toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) — seven read-only probes, **zero runtime dependencies** (Node.js built-ins only).
 
-When your agent needs to answer *"why can't I reach this server?"*, *"is the port open?"*, *"when does this certificate expire?"* or *"what does the public DNS actually return?"* — instead of guessing or fumbling through shell commands, it can call these tools directly and read structured results.
+When your agent needs to answer *"why can't I reach this server?"*, *"is the port open?"*, *"when does this certificate expire?"*, *"what does the public DNS actually return?"* or *"who owns this domain and when does it expire?"* — instead of guessing or fumbling through shell commands, it can call these tools directly and read structured results.
 
-> 中文简介：dsh-netdoctor 是 DeepSeek Harness 的网络诊断工具箱插件，提供 6 个只读探针（DNS 查询、ICMP ping、TCP 端口探测、TLS 证书检查、traceroute 路由追踪、公网 IP 与归属地查询），零运行时依赖、纯 Node 内置模块实现。适合让 Agent 直接排查"连不上服务器/端口不通/证书要过期/DNS 解析异常"等常见网络问题。
+> 中文简介：dsh-netdoctor 是 DeepSeek Harness 的网络诊断工具箱插件，提供 7 个只读探针（DNS 查询、ICMP ping、TCP 端口探测、TLS 证书检查、traceroute 路由追踪、公网 IP 与归属地查询、WHOIS 域名注册信息查询），零运行时依赖、纯 Node 内置模块实现。适合让 Agent 直接排查"连不上服务器/端口不通/证书要过期/DNS 解析异常/域名注册与到期"等常见网络问题。
 
 ## Tools
 
 | Tool | What it does | Backend |
 |------|--------------|---------|
-| `dns_lookup` | Query A / AAAA / CNAME / MX / TXT / NS / SRV / PTR records, optionally against a custom nameserver (great for testing DNS propagation) | `node:dns` |
+| `dns_lookup` | Query A / AAAA / CNAME / MX / TXT / NS / SOA / SRV / PTR / CAA records, optionally against a custom nameserver (great for testing DNS propagation) | `node:dns` |
 | `ping_host` | ICMP ping with packet-loss and min/avg/max RTT summary | system `ping` |
 | `check_port` | TCP connect probe: **open / closed / filtered / unreachable** with connect time | `node:net` |
 | `check_tls` | Real TLS handshake; reports protocol, cipher, cert subject/issuer, validity window, **days to expiry**, SANs, SHA-256 fingerprint. Certificates are inspected but never trusted, so expired/self-signed certs can be diagnosed | `node:tls` |
 | `trace_route` | Hop-by-hop path trace with per-hop RTTs | system `traceroute` / `tracert` |
 | `my_ip` | This machine's public IP, optionally with geo info (country/region/city/ISP/AS/timezone/coordinates) via ip-api.com's free keyless endpoint, with plain-IP fallback | HTTPS/HTTP GET |
+| `whois` | WHOIS registry lookup over the classic TCP port 43 protocol: automatic registry discovery via the whois.iana.org referral chain (with a best-effort TLD→registry fallback map and ARIN for IP literals), raw WHOIS text plus a structured summary (registrar, statuses, created/updated/expiry dates, nameservers) | `node:net` raw socket |
 
 ## Safety model
 
 - Every tool is **read-only** — nothing is written, configured, or changed.
 - External binaries (`ping`, `traceroute`, `tracert`) are invoked with **fixed argument arrays, never through a shell**, and every target is validated against a strict hostname/IP pattern before use.
 - Every probe has a **hard timeout**; a hung probe can never hang a session.
+- `whois` only opens outbound TCP port 43 connections to registry servers and sends a single query line — no credentials, no third-party API keys.
 - `my_ip` geo lookup can be disabled per call (`includeGeo: false`) or in config — privacy by choice.
 
 ## Install
@@ -48,6 +50,8 @@ Just ask your agent — the tools appear automatically:
 - "Trace the route to 1.1.1.1 and find where packets stall."
 - "What A records does example.com return from 8.8.8.8?"
 - "What's our public IP and where does it geolocate to?"
+- "Who registered example.com and when does the domain registration expire?"
+- "What CAA records does github.com publish for certificate authorities?"
 
 Each tool returns a structured result plus a compact text summary in the conversation.
 
@@ -65,6 +69,7 @@ plugins:
     traceTimeoutSec: 2     # per-hop wait for traceroute, seconds (1–30)
     includeGeo: true       # attach geo info to my_ip results
     httpTimeoutMs: 5000    # timeout for my_ip HTTP lookups (1000–60000)
+    whoisTimeoutMs: 5000   # timeout for WHOIS queries over TCP port 43 (1000–60000)
 ```
 
 ## Platform notes
@@ -79,7 +84,7 @@ plugins:
 ```bash
 pnpm install
 pnpm build      # tsc → dist/
-pnpm test       # vitest — 50 tests, fully offline (mock DNS, local TCP/TLS servers, parser fixtures)
+pnpm test       # vitest — 67 tests, fully offline (mock DNS, local TCP/TLS servers, parser fixtures)
 pnpm lint       # oxlint src test
 ```
 

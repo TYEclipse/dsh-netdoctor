@@ -9,7 +9,7 @@ import * as dns from 'node:dns/promises'
 import type { JsonValue } from '@deepseek-ai/dsh-tools'
 import { assertValidTarget } from './util.ts'
 
-export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SRV' | 'PTR'
+export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SOA' | 'SRV' | 'PTR' | 'CAA'
 
 export type DnsAnswer = {
   name: string
@@ -39,6 +39,12 @@ export function renderAnswer(answer: DnsAnswer): string {
   }
   if (answer.type === 'SRV') {
     return `${answer.name} SRV ${String(data.priority)} ${String(data.weight)} ${String(data.port)} ${String(data.target)} (ttl ${answer.ttl})`
+  }
+  if (answer.type === 'SOA') {
+    return `${answer.name} SOA ns=${String(data.nsname)} mbox=${String(data.hostmaster)} serial=${String(data.serial)} refresh=${String(data.refresh)} retry=${String(data.retry)} expire=${String(data.expire)} minttl=${String(data.minttl)} (ttl ${answer.ttl})`
+  }
+  if (answer.type === 'CAA') {
+    return `${answer.name} CAA ${String(data.critical)} ${String(data.tag)} "${String(data.value)}" (ttl ${answer.ttl})`
   }
   if (answer.type === 'TXT') {
     const entries = Array.isArray(data.entries) ? data.entries.map(String).join(' | ') : String(data.entries)
@@ -85,6 +91,26 @@ export async function dnsLookup(hostInput: string, record: DnsRecordType, server
   } else if (record === 'SRV') {
     const result = await resolver.resolveSrv(host)
     for (const { name, port, priority, weight } of result) answers.push({ name: name ?? host, type: 'SRV', ttl: 0, data: { port, priority, weight, target: name } })
+  } else if (record === 'SOA') {
+    const { nsname, hostmaster, serial, refresh, retry, expire, minttl } = await resolver.resolveSoa(host)
+    answers.push({ name: host, type: 'SOA', ttl: 0, data: { nsname, hostmaster, serial, refresh, retry, expire, minttl } })
+  } else if (record === 'CAA') {
+    const result = await resolver.resolveCaa(host)
+    for (const { critical, issue, issuewild, iodef, contactemail, contactphone } of result) {
+      const tag = issue !== undefined
+        ? 'issue'
+        : issuewild !== undefined
+          ? 'issuewild'
+          : iodef !== undefined
+            ? 'iodef'
+            : contactemail !== undefined
+              ? 'contactemail'
+              : contactphone !== undefined
+                ? 'contactphone'
+                : 'unknown'
+      const value = issue ?? issuewild ?? iodef ?? contactemail ?? contactphone ?? ''
+      answers.push({ name: host, type: 'CAA', ttl: 0, data: { critical, tag, value } })
+    }
   } else if (record === 'PTR') {
     const result = await resolver.reverse(host)
     for (const target of result) answers.push({ name: host, type: 'PTR', ttl: 0, data: { target } })

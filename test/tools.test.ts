@@ -17,6 +17,7 @@ describe('resolveConfig', () => {
       traceTimeoutSec: 2,
       includeGeo: true,
       httpTimeoutMs: 5_000,
+      whoisTimeoutMs: 5_000,
     })
   })
 
@@ -32,9 +33,9 @@ describe('resolveConfig', () => {
 describe('buildNetdoctorTools', () => {
   const tools = buildNetdoctorTools(resolveConfig({}))
 
-  it('exposes all six probes under their canonical names', () => {
+  it('exposes all seven probes under their canonical names', () => {
     expect(Object.keys(tools).sort()).toEqual(
-      ['check_port', 'check_tls', 'dns_lookup', 'my_ip', 'ping_host', 'trace_route'].sort(),
+      ['check_port', 'check_tls', 'dns_lookup', 'my_ip', 'ping_host', 'trace_route', 'whois'].sort(),
     )
   })
 
@@ -71,5 +72,45 @@ describe('buildNetdoctorTools', () => {
     expect(block[0]?.type).toBe('text')
     expect(block[0]?.text).toContain('x (1.2.3.4): 4/4 replies, 0% loss')
     expect(block[0]?.text).toContain('rtt: min 1 ms / avg 2 ms / max 3 ms')
+  })
+
+  it('renders a whois summary as text', () => {
+    const block = tools.whois.output.render(
+      { domain: 'example.com' },
+      {
+        domain: 'example.com',
+        server: 'whois.verisign-grs.com',
+        raw: 'fixture',
+        rawTruncated: false,
+        summary: {
+          registrar: 'RESERVED-IANA',
+          statuses: ['clientDeleteProhibited'],
+          createdDate: '1995-08-14T04:00:00Z',
+          expiryDate: '2026-08-13T04:00:00Z',
+          nameServers: ['A.IANA-SERVERS.NET'],
+        },
+      },
+    )
+    expect(block[0]?.type).toBe('text')
+    expect(block[0]?.text).toContain('whois example.com (server: whois.verisign-grs.com):')
+    expect(block[0]?.text).toContain('registrar: RESERVED-IANA')
+    expect(block[0]?.text).toContain('expiry: 2026-08-13T04:00:00Z')
+    expect(block[0]?.text).toContain('nameservers: A.IANA-SERVERS.NET')
+  })
+
+  it('renders a whois error result as text', () => {
+    const block = tools.whois.output.render(
+      { domain: 'example.com' },
+      {
+        domain: 'example.com',
+        server: 'whois.example.net',
+        raw: '',
+        rawTruncated: false,
+        summary: { statuses: [], nameServers: [] },
+        error: 'whois query to whois.example.net failed: ETIMEDOUT',
+      },
+    )
+    expect(block[0]?.type).toBe('text')
+    expect(block[0]?.text).toContain('whois example.com: whois query to whois.example.net failed: ETIMEDOUT')
   })
 })

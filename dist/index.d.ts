@@ -1,13 +1,14 @@
 /**
  * dsh-netdoctor — network diagnostics toolbox for DeepSeek Harness.
  *
- * Six read-only probes, zero runtime dependencies (node built-ins only):
- *   dns_lookup   — DNS records (A/AAAA/CNAME/MX/TXT/NS/SRV/PTR), optional custom nameserver
+ * Seven read-only probes, zero runtime dependencies (node built-ins only):
+ *   dns_lookup   — DNS records (A/AAAA/CNAME/MX/TXT/NS/SOA/SRV/PTR/CAA), optional custom nameserver
  *   ping_host    — ICMP ping via the system ping utility, parsed summary
  *   check_port   — TCP connect probe: open / closed / filtered
  *   check_tls    — TLS handshake + leaf certificate identity, validity, days to expiry
  *   trace_route  — traceroute via the system traceroute/tracert utility
  *   my_ip        — public IP address with optional geo info (ip-api.com, keyless)
+ *   whois        — WHOIS registry lookup via TCP port 43 with IANA referral discovery
  *
  * Safety model: every probe is read-only. External binaries (ping, traceroute,
  * tracert) are invoked with fixed argument arrays and never through a shell,
@@ -37,6 +38,8 @@ export interface Config {
     includeGeo?: boolean;
     /** Timeout for the my_ip HTTP lookups (1000–60000 ms). */
     httpTimeoutMs?: number;
+    /** Timeout for WHOIS queries over TCP port 43 (1000–60000 ms). */
+    whoisTimeoutMs?: number;
 }
 export declare const Config: z<Config>;
 /** Config with every default resolved (all fields guaranteed). */
@@ -48,6 +51,7 @@ export interface ResolvedConfig {
     traceTimeoutSec: number;
     includeGeo: boolean;
     httpTimeoutMs: number;
+    whoisTimeoutMs: number;
 }
 /** Resolve loader config into the effective runtime config. */
 export declare function resolveConfig(config: Config): ResolvedConfig;

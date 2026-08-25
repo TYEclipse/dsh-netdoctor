@@ -13,6 +13,7 @@ import { checkPort, type PortResult } from './port.ts'
 import { checkTls, type TlsResult } from './tls.ts'
 import { getPublicIp, type IpGeoResult } from './ip.ts'
 import { traceRoute, type TraceResult } from './route.ts'
+import { whoisLookup, type WhoisResult } from './whois.ts'
 import type { ResolvedConfig } from './index.ts'
 
 export interface ToolSet {
@@ -22,9 +23,10 @@ export interface ToolSet {
   check_tls: ToolDefinition
   trace_route: ToolDefinition
   my_ip: ToolDefinition
+  whois: ToolDefinition
 }
 
-const DNS_RECORDS: readonly DnsRecordType[] = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR']
+const DNS_RECORDS: readonly DnsRecordType[] = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'SRV', 'PTR', 'CAA']
 
 function renderDns(value: unknown): string {
   const result = value as { host: string; record: string; server: string; answers: DnsAnswer[] }
@@ -92,11 +94,27 @@ function renderIp(value: unknown): string {
   ].join('\n')
 }
 
-/** Build all six tool definitions from the resolved config. */
+function renderWhois(value: unknown): string {
+  const result = value as WhoisResult
+  if (result.error !== undefined) {
+    return `whois ${result.domain}: ${result.error}`
+  }
+  const summary = result.summary
+  const lines = [`whois ${result.domain} (server: ${result.server}${result.rawTruncated ? ', raw truncated' : ''}):`]
+  if (summary.registrar !== undefined) lines.push(`  registrar: ${summary.registrar}`)
+  if (summary.createdDate !== undefined) lines.push(`  created: ${summary.createdDate}`)
+  if (summary.updatedDate !== undefined) lines.push(`  updated: ${summary.updatedDate}`)
+  if (summary.expiryDate !== undefined) lines.push(`  expiry: ${summary.expiryDate}`)
+  if (summary.statuses.length > 0) lines.push(`  status: ${summary.statuses.join(', ')}`)
+  if (summary.nameServers.length > 0) lines.push(`  nameservers: ${summary.nameServers.join(', ')}`)
+  return lines.join('\n')
+}
+
+/** Build all seven tool definitions from the resolved config. */
 export function buildNetdoctorTools(config: ResolvedConfig): ToolSet {
   const dns_lookup = defineTool({
     name: 'dns_lookup',
-    description: 'Query DNS records for a hostname or IP address (A, AAAA, CNAME, MX, TXT, NS, SRV, PTR) using the '
+    description: 'Query DNS records for a hostname or IP address (A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, PTR, CAA) using the '
       + 'system resolver or a custom nameserver — useful for checking what the public DNS actually returns and for '
       + 'testing DNS propagation. Read-only.',
     parameters: {
@@ -318,5 +336,46 @@ export function buildNetdoctorTools(config: ResolvedConfig): ToolSet {
     },
   })
 
-  return { dns_lookup, ping_host, check_port, check_tls, trace_route, my_ip }
+  const whois = defineTool({
+    name: 'whois',
+    description: 'Query the WHOIS registry for a domain name or IP address over the classic TCP port 43 protocol. '
+      + 'Automatically discovers the right registry server via the whois.iana.org referral chain, then returns the raw '
+      + 'WHOIS text plus a best-effort structured summary (registrar, statuses, created/updated/expiry dates, '
+      + 'nameservers). Useful for checking domain registration, expiry and nameserver delegation. Read-only.',
+    parameters: {
+      domain: { type: 'string', required: true, description: 'Domain name or IP address to look up (e.g. "example.com" or "8.8.8.8").' },
+      server: { type: 'string', description: 'Optional WHOIS server to query directly (hostname), skipping IANA discovery, e.g. "whois.verisign-grs.com".' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          domain: { type: 'string', required: true },
+          server: { type: 'string', required: true },
+          raw: { type: 'string', required: true },
+          rawTruncated: { type: 'boolean', required: true },
+          summary: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              registrar: { type: 'string' },
+              statuses: { type: 'array', required: true, items: { type: 'string' } },
+              createdDate: { type: 'string' },
+              updatedDate: { type: 'string' },
+              expiryDate: { type: 'string' },
+              nameServers: { type: 'array', required: true, items: { type: 'string' } },
+            },
+          },
+          error: { type: 'string' },
+        },
+      },
+      render: (_args: { domain: string }, value: unknown) => [{ type: 'text', text: renderWhois(value) }],
+    },
+    async execute(args: { domain: string; server?: string }) {
+      return whoisLookup(args.domain, args.server, config.whoisTimeoutMs)
+    },
+  })
+
+  return { dns_lookup, ping_host, check_port, check_tls, trace_route, my_ip, whois }
 }

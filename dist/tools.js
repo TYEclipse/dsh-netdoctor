@@ -12,7 +12,8 @@ import { checkPort } from "./port.js";
 import { checkTls } from "./tls.js";
 import { getPublicIp } from "./ip.js";
 import { traceRoute } from "./route.js";
-const DNS_RECORDS = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'PTR'];
+import { whoisLookup } from "./whois.js";
+const DNS_RECORDS = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'SRV', 'PTR', 'CAA'];
 function renderDns(value) {
     const result = value;
     if (result.answers.length === 0) {
@@ -73,11 +74,32 @@ function renderIp(value) {
         `  coordinates: ${geo.lat}, ${geo.lon}`,
     ].join('\n');
 }
-/** Build all six tool definitions from the resolved config. */
+function renderWhois(value) {
+    const result = value;
+    if (result.error !== undefined) {
+        return `whois ${result.domain}: ${result.error}`;
+    }
+    const summary = result.summary;
+    const lines = [`whois ${result.domain} (server: ${result.server}${result.rawTruncated ? ', raw truncated' : ''}):`];
+    if (summary.registrar !== undefined)
+        lines.push(`  registrar: ${summary.registrar}`);
+    if (summary.createdDate !== undefined)
+        lines.push(`  created: ${summary.createdDate}`);
+    if (summary.updatedDate !== undefined)
+        lines.push(`  updated: ${summary.updatedDate}`);
+    if (summary.expiryDate !== undefined)
+        lines.push(`  expiry: ${summary.expiryDate}`);
+    if (summary.statuses.length > 0)
+        lines.push(`  status: ${summary.statuses.join(', ')}`);
+    if (summary.nameServers.length > 0)
+        lines.push(`  nameservers: ${summary.nameServers.join(', ')}`);
+    return lines.join('\n');
+}
+/** Build all seven tool definitions from the resolved config. */
 export function buildNetdoctorTools(config) {
     const dns_lookup = defineTool({
         name: 'dns_lookup',
-        description: 'Query DNS records for a hostname or IP address (A, AAAA, CNAME, MX, TXT, NS, SRV, PTR) using the '
+        description: 'Query DNS records for a hostname or IP address (A, AAAA, CNAME, MX, TXT, NS, SOA, SRV, PTR, CAA) using the '
             + 'system resolver or a custom nameserver — useful for checking what the public DNS actually returns and for '
             + 'testing DNS propagation. Read-only.',
         parameters: {
@@ -293,6 +315,46 @@ export function buildNetdoctorTools(config) {
             return getPublicIp(args.includeGeo ?? config.includeGeo, config.httpTimeoutMs);
         },
     });
-    return { dns_lookup, ping_host, check_port, check_tls, trace_route, my_ip };
+    const whois = defineTool({
+        name: 'whois',
+        description: 'Query the WHOIS registry for a domain name or IP address over the classic TCP port 43 protocol. '
+            + 'Automatically discovers the right registry server via the whois.iana.org referral chain, then returns the raw '
+            + 'WHOIS text plus a best-effort structured summary (registrar, statuses, created/updated/expiry dates, '
+            + 'nameservers). Useful for checking domain registration, expiry and nameserver delegation. Read-only.',
+        parameters: {
+            domain: { type: 'string', required: true, description: 'Domain name or IP address to look up (e.g. "example.com" or "8.8.8.8").' },
+            server: { type: 'string', description: 'Optional WHOIS server to query directly (hostname), skipping IANA discovery, e.g. "whois.verisign-grs.com".' },
+        },
+        output: {
+            schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    domain: { type: 'string', required: true },
+                    server: { type: 'string', required: true },
+                    raw: { type: 'string', required: true },
+                    rawTruncated: { type: 'boolean', required: true },
+                    summary: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: {
+                            registrar: { type: 'string' },
+                            statuses: { type: 'array', required: true, items: { type: 'string' } },
+                            createdDate: { type: 'string' },
+                            updatedDate: { type: 'string' },
+                            expiryDate: { type: 'string' },
+                            nameServers: { type: 'array', required: true, items: { type: 'string' } },
+                        },
+                    },
+                    error: { type: 'string' },
+                },
+            },
+            render: (_args, value) => [{ type: 'text', text: renderWhois(value) }],
+        },
+        async execute(args) {
+            return whoisLookup(args.domain, args.server, config.whoisTimeoutMs);
+        },
+    });
+    return { dns_lookup, ping_host, check_port, check_tls, trace_route, my_ip, whois };
 }
 //# sourceMappingURL=tools.js.map
