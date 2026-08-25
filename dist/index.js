@@ -1,13 +1,14 @@
 /**
  * dsh-netdoctor — network diagnostics toolbox for DeepSeek Harness.
  *
- * Six read-only probes, zero runtime dependencies (node built-ins only):
- *   dns_lookup   — DNS records (A/AAAA/CNAME/MX/TXT/NS/SRV/PTR), optional custom nameserver
+ * Seven read-only probes, zero runtime dependencies (node built-ins only):
+ *   dns_lookup   — DNS records (A/AAAA/CNAME/MX/TXT/NS/SOA/SRV/PTR/CAA), optional custom nameserver
  *   ping_host    — ICMP ping via the system ping utility, parsed summary
  *   check_port   — TCP connect probe: open / closed / filtered
  *   check_tls    — TLS handshake + leaf certificate identity, validity, days to expiry
  *   trace_route  — traceroute via the system traceroute/tracert utility
  *   my_ip        — public IP address with optional geo info (ip-api.com, keyless)
+ *   whois        — WHOIS registry lookup via TCP port 43 with IANA referral discovery
  *
  * Safety model: every probe is read-only. External binaries (ping, traceroute,
  * tracert) are invoked with fixed argument arrays and never through a shell,
@@ -29,6 +30,7 @@ export const Config = z.object({
     traceTimeoutSec: z.number().min(1).max(30).default(2),
     includeGeo: z.boolean().default(true),
     httpTimeoutMs: z.number().min(1_000).max(60_000).default(5_000),
+    whoisTimeoutMs: z.number().min(1_000).max(60_000).default(5_000),
 });
 /** Resolve loader config into the effective runtime config. */
 export function resolveConfig(config) {
@@ -40,6 +42,7 @@ export function resolveConfig(config) {
         traceTimeoutSec: config.traceTimeoutSec ?? 2,
         includeGeo: config.includeGeo ?? true,
         httpTimeoutMs: config.httpTimeoutMs ?? 5_000,
+        whoisTimeoutMs: config.whoisTimeoutMs ?? 5_000,
     };
 }
 /** Register every netdoctor tool on one agent; returns the disposer. */

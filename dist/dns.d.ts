@@ -5,7 +5,7 @@
  * @module dsh-netdoctor/dns
  */
 import type { JsonValue } from '@deepseek-ai/dsh-tools';
-export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SRV' | 'PTR';
+export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SOA' | 'SRV' | 'PTR' | 'CAA';
 export type DnsAnswer = {
     name: string;
     type: string;

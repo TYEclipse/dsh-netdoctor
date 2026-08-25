@@ -57,8 +57,9 @@ describe('checkTls', () => {
     expect(result.cert?.subject).toBe('test.local')
     expect(result.cert?.issuer).toBe('test.local')
     expect(result.cert?.altNames).toContain('DNS:test.local')
-    expect(result.cert?.daysRemaining).toBeGreaterThan(360)
-    expect(result.cert?.daysRemaining).toBeLessThan(370)
+    // Days remaining must match the certificate's own validity window
+    // (assertion is clock-independent, so the fixture never rots).
+    expect(result.cert?.daysRemaining).toBe(computeDaysRemaining(result.cert?.validTo ?? '', Date.now()))
     // self-signed: inspected but never trusted
     expect(result.authorized).toBe(false)
   })

@@ -13,7 +13,9 @@ const mocks = vi.hoisted(() => ({
   resolveMx: vi.fn(),
   resolveTxt: vi.fn(),
   resolveNs: vi.fn(),
+  resolveSoa: vi.fn(),
   resolveSrv: vi.fn(),
+  resolveCaa: vi.fn(),
   reverse: vi.fn(),
   setServers: vi.fn(),
 }))
@@ -26,7 +28,9 @@ vi.mock('node:dns/promises', () => {
     resolveMx = mocks.resolveMx
     resolveTxt = mocks.resolveTxt
     resolveNs = mocks.resolveNs
+    resolveSoa = mocks.resolveSoa
     resolveSrv = mocks.resolveSrv
+    resolveCaa = mocks.resolveCaa
     reverse = mocks.reverse
     setServers = mocks.setServers
   }
@@ -66,6 +70,38 @@ describe('dnsLookup', () => {
     mocks.resolveSrv.mockResolvedValue([{ name: 'sip.example.com', port: 5060, priority: 0, weight: 5 }])
     const result = await dnsLookup('_sip._tcp.example.com', 'SRV', undefined)
     expect(result.answers[0]?.data).toEqual({ port: 5060, priority: 0, weight: 5, target: 'sip.example.com' })
+  })
+
+  it('dispatches SOA records', async () => {
+    mocks.resolveSoa.mockResolvedValue({
+      nsname: 'ns1.example.com',
+      hostmaster: 'admin.example.com',
+      serial: 2026010101,
+      refresh: 7200,
+      retry: 3600,
+      expire: 1209600,
+      minttl: 300,
+    })
+    const result = await dnsLookup('example.com', 'SOA', undefined)
+    expect(result.answers[0]?.data).toEqual({
+      nsname: 'ns1.example.com',
+      hostmaster: 'admin.example.com',
+      serial: 2026010101,
+      refresh: 7200,
+      retry: 3600,
+      expire: 1209600,
+      minttl: 300,
+    })
+  })
+
+  it('dispatches CAA records and normalizes the tag field', async () => {
+    mocks.resolveCaa.mockResolvedValue([
+      { critical: 0, issue: 'letsencrypt.org' },
+      { critical: 128, iodef: 'mailto:sec@example.com' },
+    ])
+    const result = await dnsLookup('example.com', 'CAA', undefined)
+    expect(result.answers[0]?.data).toEqual({ critical: 0, tag: 'issue', value: 'letsencrypt.org' })
+    expect(result.answers[1]?.data).toEqual({ critical: 128, tag: 'iodef', value: 'mailto:sec@example.com' })
   })
 
   it('dispatches PTR records via reverse()', async () => {
