@@ -7,6 +7,7 @@
  * @module dsh-netdoctor/tls
  */
 import { connect } from 'node:tls';
+import { isIP } from 'node:net';
 import { assertValidPort, assertValidTarget, round2 } from "./util.js";
 /** Compute whole days from `now` until `validTo` (negative = already expired). */
 export function computeDaysRemaining(validTo, now) {
@@ -27,7 +28,10 @@ export async function checkTls(hostInput, portInput, timeoutMs) {
         const socket = connect({
             host,
             port,
-            servername: host,
+            // Node ≥20 throws ERR_TLS_SNI when SNI is set to an IP literal
+            // ("Setting the TLS ServerName to an IP address is not permitted").
+            // For IP targets we let Node omit SNI automatically (RFC 6066 — no SNI for IPs).
+            ...(isIP(host) ? {} : { servername: host }),
             rejectUnauthorized: false,
             timeout: timeoutMs,
         });

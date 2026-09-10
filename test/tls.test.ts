@@ -49,6 +49,16 @@ describe('checkTls', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
 
+  // 回归（R31 门禁接入日实测抓出）：Node ≥20 拒绝把 IP 字面量设为 SNI，
+  // 旧实现无条件传 `servername: host` → 对 IP 目标直接抛 ERR_TLS_SNI。
+  it('does not set SNI for IP targets (regression: ERR_TLS_SNI on Node ≥20)', async () => {
+    const byIp = await checkTls('127.0.0.1', port, 5_000)
+    expect(byIp.connected).toBe(true)
+    expect(byIp.host).toBe('127.0.0.1')
+    const byHostname = await checkTls('localhost', port, 5_000)
+    expect(byHostname.connected).toBe(true)
+  })
+
   it('completes a handshake and reports the self-signed certificate', async () => {
     const result = await checkTls('127.0.0.1', port, 5_000)
     expect(result.connected).toBe(true)

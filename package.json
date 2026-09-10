@@ -1,6 +1,6 @@
 {
   "name": "dsh-netdoctor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Network diagnostics toolbox for DeepSeek Harness (dsh): DNS lookup (A/AAAA/CNAME/MX/TXT/NS/SOA/SRV/PTR/CAA), ICMP ping, TCP port check, TLS certificate check, traceroute, WHOIS registry lookup, and public IP info — zero runtime dependencies",
   "type": "module",
   "main": "dist/index.js",
@@ -53,6 +53,7 @@
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@types/node": "^24.13.3",
+    "@vitest/coverage-v8": "3.2.0",
     "oxlint": "^1.6.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
