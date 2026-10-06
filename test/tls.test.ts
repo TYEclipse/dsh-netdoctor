@@ -1,6 +1,8 @@
 /**
  * Tests for the TLS probe: a real local TLS server with self-signed fixture
  * certificates (offline), plus the days-remaining helper.
+ *
+ * ORACLE: test/oracle/anchors.py
  */
 
 import { readFileSync } from 'node:fs'

@@ -118,6 +118,13 @@ describe('dnsLookup', () => {
     expect(result.server).toBe('8.8.8.8')
   })
 
+  it('rejects a nameserver that is not an IP literal', async () => {
+    // node's resolver API takes IPs only — fail with a readable message instead
+    // of letting setServers throw deep inside node.
+    await expect(dnsLookup('example.com', 'A', 'dns.example.com')).rejects.toThrow(/nameserver/)
+    expect(mocks.setServers).not.toHaveBeenCalled()
+  })
+
   it('validates targets', async () => {
     await expect(dnsLookup('bad host;', 'A', undefined)).rejects.toThrow()
   })

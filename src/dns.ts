@@ -7,7 +7,7 @@
 
 import * as dns from 'node:dns/promises'
 import type { JsonValue } from '@deepseek-ai/dsh-tools'
-import { assertValidTarget } from './util.ts'
+import { assertValidResolver, assertValidTarget } from './util.ts'
 
 export type DnsRecordType = 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'NS' | 'SOA' | 'SRV' | 'PTR' | 'CAA'
 
@@ -62,9 +62,10 @@ export async function dnsLookup(hostInput: string, record: DnsRecordType, server
   let resolver: dns.Resolver
   let serverUsed = 'system'
   if (server !== undefined && server.trim() !== '') {
+    const nameserver = assertValidResolver(server, 'nameserver')
     resolver = new dns.Resolver()
-    resolver.setServers([server.trim()])
-    serverUsed = server.trim()
+    resolver.setServers([nameserver])
+    serverUsed = nameserver
   } else {
     resolver = new dns.Resolver()
   }

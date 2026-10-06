@@ -5,7 +5,7 @@
  * @module dsh-netdoctor/dns
  */
 import * as dns from 'node:dns/promises';
-import { assertValidTarget } from "./util.js";
+import { assertValidResolver, assertValidTarget } from "./util.js";
 /** Render one answer for the text view. */
 export function renderAnswer(answer) {
     const { data } = answer;
@@ -42,9 +42,10 @@ export async function dnsLookup(hostInput, record, server) {
     let resolver;
     let serverUsed = 'system';
     if (server !== undefined && server.trim() !== '') {
+        const nameserver = assertValidResolver(server, 'nameserver');
         resolver = new dns.Resolver();
-        resolver.setServers([server.trim()]);
-        serverUsed = server.trim();
+        resolver.setServers([nameserver]);
+        serverUsed = nameserver;
     }
     else {
         resolver = new dns.Resolver();

@@ -1,16 +1,17 @@
 # dsh-netdoctor 🩺
 
-Network diagnostics toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) — seven read-only probes, **zero runtime dependencies** (Node.js built-ins only).
+Network diagnostics toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) — eight read-only probes, **zero runtime dependencies** (Node.js built-ins only).
 
 When your agent needs to answer *"why can't I reach this server?"*, *"is the port open?"*, *"when does this certificate expire?"*, *"what does the public DNS actually return?"* or *"who owns this domain and when does it expire?"* — instead of guessing or fumbling through shell commands, it can call these tools directly and read structured results.
 
-> 中文简介：dsh-netdoctor 是 DeepSeek Harness 的网络诊断工具箱插件，提供 7 个只读探针（DNS 查询、ICMP ping、TCP 端口探测、TLS 证书检查、traceroute 路由追踪、公网 IP 与归属地查询、WHOIS 域名注册信息查询），零运行时依赖、纯 Node 内置模块实现。适合让 Agent 直接排查"连不上服务器/端口不通/证书要过期/DNS 解析异常/域名注册与到期"等常见网络问题。
+> 中文简介：dsh-netdoctor 是 DeepSeek Harness 的网络诊断工具箱插件，提供 8 个只读探针（DNS 查询、多解析器 DNS 传播对比、ICMP ping、TCP 端口探测、TLS 证书检查、traceroute 路由追踪、公网 IP 与归属地查询、WHOIS 域名注册信息查询），零运行时依赖、纯 Node 内置模块实现。适合让 Agent 直接排查"连不上服务器/端口不通/证书要过期/DNS 解析异常/域名注册与到期"等常见网络问题。
 
 ## Tools
 
 | Tool | What it does | Backend |
 |------|--------------|---------|
 | `dns_lookup` | Query A / AAAA / CNAME / MX / TXT / NS / SOA / SRV / PTR / CAA records, optionally against a custom nameserver (great for testing DNS propagation) | `node:dns` |
+| `dns_propagation` | Query one record through several public resolvers in parallel and report where they agree and where they differ — answers are grouped by record content, so "4 of 6 agree" is counted from the data; failed or slow resolvers are reported as failed rather than folded into the majority | `node:dns` |
 | `ping_host` | ICMP ping with packet-loss and min/avg/max RTT summary | system `ping` |
 | `check_port` | TCP connect probe: **open / closed / filtered / unreachable** with connect time | `node:net` |
 | `check_tls` | Real TLS handshake; reports protocol, cipher, cert subject/issuer, validity window, **days to expiry**, SANs, SHA-256 fingerprint. Certificates are inspected but never trusted, so expired/self-signed certs can be diagnosed | `node:tls` |
@@ -33,7 +34,7 @@ Add the plugin to your dsh configuration:
 ```sh
 dsh plugin --profile web add github:TYEclipse/dsh-netdoctor
 # or a pinned release:
-dsh plugin --profile web add github:TYEclipse/dsh-netdoctor#v0.1.0
+dsh plugin --profile web add github:TYEclipse/dsh-netdoctor#v0.3.0
 ```
 
 The build output (`dist/`) is committed to this repository, so git-hosted
@@ -49,6 +50,7 @@ Just ask your agent — the tools appear automatically:
 - "When does the TLS certificate for example.com expire?"
 - "Trace the route to 1.1.1.1 and find where packets stall."
 - "What A records does example.com return from 8.8.8.8?"
+- "Has the new A record for example.com propagated? Check it across several public resolvers."
 - "What's our public IP and where does it geolocate to?"
 - "Who registered example.com and when does the domain registration expire?"
 - "What CAA records does github.com publish for certificate authorities?"
@@ -70,6 +72,7 @@ plugins:
     includeGeo: true       # attach geo info to my_ip results
     httpTimeoutMs: 5000    # timeout for my_ip HTTP lookups (1000–60000)
     whoisTimeoutMs: 5000   # timeout for WHOIS queries over TCP port 43 (1000–60000)
+    propagationTimeoutMs: 5000  # per-resolver answer deadline for dns_propagation (100–60000)
 ```
 
 ## Platform notes
@@ -84,7 +87,7 @@ plugins:
 ```bash
 pnpm install
 pnpm build      # tsc → dist/
-pnpm test       # vitest — 67 tests, fully offline (mock DNS, local TCP/TLS servers, parser fixtures)
+pnpm test       # vitest — 86 tests, fully offline (mock DNS, local TCP/TLS servers, parser fixtures)
 pnpm lint       # oxlint src test
 ```
 

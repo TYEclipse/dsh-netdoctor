@@ -1,11 +1,14 @@
 /**
- * Unit tests for shared helpers: target/port validation, ping/traceroute
- * output parsers, and process execution.
+ * Unit tests for shared helpers: target/port/resolver validation, ping and
+ * traceroute output parsers, and process execution.
+ *
+ * ORACLE: test/oracle/anchors.py
  */
 
 import { describe, expect, it } from 'vitest'
 import {
   assertValidPort,
+  assertValidResolver,
   assertValidTarget,
   parsePacketSummary,
   parseRttSummary,
@@ -53,6 +56,25 @@ describe('assertValidPort', () => {
     expect(() => assertValidPort('80')).toThrow()
     expect(() => assertValidPort(NaN)).toThrow()
     expect(() => assertValidPort(undefined)).toThrow()
+  })
+})
+
+describe('assertValidResolver', () => {
+  it('accepts IPv4 and IPv6 literals, trimmed', () => {
+    expect(assertValidResolver('8.8.8.8')).toBe('8.8.8.8')
+    expect(assertValidResolver(' 1.1.1.1 ')).toBe('1.1.1.1')
+    expect(assertValidResolver('2606:4700:4700::1111')).toBe('2606:4700:4700::1111')
+  })
+
+  it('rejects hostnames and out-of-range addresses', () => {
+    expect(() => assertValidResolver('dns.example.com')).toThrow(/IP address/)
+    expect(() => assertValidResolver('')).toThrow(/IP address/)
+    expect(() => assertValidResolver('256.1.1.1')).toThrow(/out-of-range/)
+    expect(() => assertValidResolver('8.8.8.8:53')).toThrow()
+  })
+
+  it('names the offending field', () => {
+    expect(() => assertValidResolver('whois.example.com', 'nameserver')).toThrow(/^nameserver /)
   })
 })
 

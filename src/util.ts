@@ -32,6 +32,25 @@ export function assertValidTarget(input: string, what = 'host'): string {
   throw new Error(`${what} "${input}" is not a valid hostname or IP address`)
 }
 
+/**
+ * Validate a DNS resolver address. node's resolver API takes IP literals only
+ * (a hostname fails deep inside `setServers` with an opaque error), so reject
+ * hostnames here with a message that says what is wrong.
+ */
+export function assertValidResolver(input: string, what = 'resolver'): string {
+  const server = input.trim()
+  if (server.length === 0) {
+    throw new Error(`${what} must be an IP address (got empty input)`)
+  }
+  if (IPV4_RE.test(server)) {
+    const octets = server.split('.').map(Number)
+    if (octets.every((octet) => octet >= 0 && octet <= 255)) return server
+    throw new Error(`${what} "${input}" looks like an IPv4 address with out-of-range octets`)
+  }
+  if (IPV6_RE.test(server) && server.includes(':')) return server
+  throw new Error(`${what} "${input}" must be an IP address (hostnames are not accepted by the DNS resolver API)`)
+}
+
 /** Validate a TCP port. */
 export function assertValidPort(port: unknown): number {
   if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) {

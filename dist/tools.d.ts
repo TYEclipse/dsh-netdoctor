@@ -9,6 +9,7 @@ import { type ToolDefinition } from '@deepseek-ai/dsh-tools';
 import type { ResolvedConfig } from './index.ts';
 export interface ToolSet {
     dns_lookup: ToolDefinition;
+    dns_propagation: ToolDefinition;
     ping_host: ToolDefinition;
     check_port: ToolDefinition;
     check_tls: ToolDefinition;

@@ -1,5 +1,7 @@
 /**
  * Tests for traceroute parsing (unix + windows forms, timeouts, banners).
+ *
+ * ORACLE: test/oracle/anchors.py
  */
 
 import { describe, expect, it } from 'vitest'

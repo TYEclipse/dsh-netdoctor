@@ -1,14 +1,15 @@
 /**
  * dsh-netdoctor — network diagnostics toolbox for DeepSeek Harness.
  *
- * Seven read-only probes, zero runtime dependencies (node built-ins only):
- *   dns_lookup   — DNS records (A/AAAA/CNAME/MX/TXT/NS/SOA/SRV/PTR/CAA), optional custom nameserver
- *   ping_host    — ICMP ping via the system ping utility, parsed summary
- *   check_port   — TCP connect probe: open / closed / filtered
- *   check_tls    — TLS handshake + leaf certificate identity, validity, days to expiry
- *   trace_route  — traceroute via the system traceroute/tracert utility
- *   my_ip        — public IP address with optional geo info (ip-api.com, keyless)
- *   whois        — WHOIS registry lookup via TCP port 43 with IANA referral discovery
+ * Eight read-only probes, zero runtime dependencies (node built-ins only):
+ *   dns_lookup      — DNS records (A/AAAA/CNAME/MX/TXT/NS/SOA/SRV/PTR/CAA), optional custom nameserver
+ *   dns_propagation — one record across several public resolvers, with agreement/difference reporting
+ *   ping_host       — ICMP ping via the system ping utility, parsed summary
+ *   check_port      — TCP connect probe: open / closed / filtered
+ *   check_tls       — TLS handshake + leaf certificate identity, validity, days to expiry
+ *   trace_route     — traceroute via the system traceroute/tracert utility
+ *   my_ip           — public IP address with optional geo info (ip-api.com, keyless)
+ *   whois           — WHOIS registry lookup via TCP port 43 with IANA referral discovery
  *
  * Safety model: every probe is read-only. External binaries (ping, traceroute,
  * tracert) are invoked with fixed argument arrays and never through a shell,
@@ -40,6 +41,8 @@ export interface Config {
     httpTimeoutMs?: number;
     /** Timeout for WHOIS queries over TCP port 43 (1000–60000 ms). */
     whoisTimeoutMs?: number;
+    /** Per-resolver answer deadline for dns_propagation (100–60000 ms). */
+    propagationTimeoutMs?: number;
 }
 export declare const Config: z<Config>;
 /** Config with every default resolved (all fields guaranteed). */
@@ -52,6 +55,7 @@ export interface ResolvedConfig {
     includeGeo: boolean;
     httpTimeoutMs: number;
     whoisTimeoutMs: number;
+    propagationTimeoutMs: number;
 }
 /** Resolve loader config into the effective runtime config. */
 export declare function resolveConfig(config: Config): ResolvedConfig;

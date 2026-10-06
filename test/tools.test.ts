@@ -1,5 +1,7 @@
 /**
- * Tests for tool definition assembly and config resolution.
+ * Tests for tool definition assembly, config resolution and the text renderers.
+ *
+ * ORACLE: test/oracle/anchors.py
  */
 
 import { describe, expect, it } from 'vitest'
@@ -18,6 +20,7 @@ describe('resolveConfig', () => {
       includeGeo: true,
       httpTimeoutMs: 5_000,
       whoisTimeoutMs: 5_000,
+      propagationTimeoutMs: 5_000,
     })
   })
 
@@ -33,9 +36,9 @@ describe('resolveConfig', () => {
 describe('buildNetdoctorTools', () => {
   const tools = buildNetdoctorTools(resolveConfig({}))
 
-  it('exposes all seven probes under their canonical names', () => {
+  it('exposes all eight probes under their canonical names', () => {
     expect(Object.keys(tools).sort()).toEqual(
-      ['check_port', 'check_tls', 'dns_lookup', 'my_ip', 'ping_host', 'trace_route', 'whois'].sort(),
+      ['check_port', 'check_tls', 'dns_lookup', 'dns_propagation', 'my_ip', 'ping_host', 'trace_route', 'whois'].sort(),
     )
   })
 
@@ -112,5 +115,61 @@ describe('buildNetdoctorTools', () => {
     )
     expect(block[0]?.type).toBe('text')
     expect(block[0]?.text).toContain('whois example.com: whois query to whois.example.net failed: ETIMEDOUT')
+  })
+
+  it('renders a propagation result with one group per distinct answer set', () => {
+    const block = tools.dns_propagation.output.render(
+      { host: 'example.com' },
+      {
+        host: 'example.com',
+        record: 'A',
+        resolvers: 3,
+        responded: 2,
+        failed: 1,
+        consistent: false,
+        consensus: { fingerprint: 'A {"address":"93.184.216.34"}', resolvers: ['1.1.1.1', '8.8.8.8'] },
+        groups: [
+          {
+            fingerprint: 'A {"address":"93.184.216.34"}',
+            resolvers: ['1.1.1.1'],
+            answers: [{ name: 'example.com', type: 'A', ttl: 300, data: { address: '93.184.216.34' } }],
+          },
+          {
+            fingerprint: 'A {"address":"93.184.216.99"}',
+            resolvers: ['9.9.9.9'],
+            answers: [{ name: 'example.com', type: 'A', ttl: 60, data: { address: '93.184.216.99' } }],
+          },
+        ],
+        probes: [
+          { label: '1.1.1.1', server: '1.1.1.1', status: 'ok', answers: [], elapsedMs: 12 },
+          { label: '9.9.9.9', server: '9.9.9.9', status: 'ok', answers: [], elapsedMs: 30 },
+          { label: '8.8.8.8', server: '8.8.8.8', status: 'error', answers: [], elapsedMs: 5_000, error: 'no answer from 8.8.8.8 within 5000 ms', timedOut: true },
+        ],
+        note: '1 of 3 resolvers did not answer — agreement is partial; resolvers disagree: 2 distinct answer sets',
+      },
+    )
+    const text = block[0]?.text ?? ''
+    expect(block[0]?.type).toBe('text')
+    expect(text).toContain('dns propagation for example.com A across 3 resolvers: 2 answered, 2 distinct answer set(s)')
+    expect(text).toContain('[1/2] 1.1.1.1:')
+    expect(text).toContain('93.184.216.99 (ttl 60)')
+    expect(text).toContain('⚠️ 8.8.8.8 (8.8.8.8): no answer from 8.8.8.8 within 5000 ms')
+  })
+
+  it('renders an empty propagation answer set honestly', () => {
+    const block = tools.dns_propagation.output.render(
+      { host: 'example.com' },
+      {
+        host: 'example.com',
+        record: 'MX',
+        resolvers: 1,
+        responded: 1,
+        failed: 0,
+        consistent: true,
+        groups: [{ fingerprint: '', resolvers: ['1.1.1.1'], answers: [] }],
+        probes: [{ label: '1.1.1.1', server: '1.1.1.1', status: 'ok', answers: [], elapsedMs: 8 }],
+      },
+    )
+    expect(block[0]?.text).toContain('(no records in the answer)')
   })
 })

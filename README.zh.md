@@ -1,6 +1,6 @@
 # dsh-netdoctor 🩺 网络诊断工具箱
 
-DeepSeek Harness (dsh) 插件：7 个只读网络探针，**零运行时依赖**（仅 Node.js 内置模块）。
+DeepSeek Harness (dsh) 插件：8 个只读网络探针，**零运行时依赖**（仅 Node.js 内置模块）。
 
 让 Agent 直接排查常见网络问题——"服务器连不上？端口通不通？证书何时过期？公共 DNS 返回了什么？域名是谁注册的、何时到期？"——而不必猜测或绕道 shell 命令。
 
@@ -9,6 +9,7 @@ DeepSeek Harness (dsh) 插件：7 个只读网络探针，**零运行时依赖**
 | 工具 | 用途 | 实现 |
 |------|------|------|
 | `dns_lookup` | 查询 A / AAAA / CNAME / MX / TXT / NS / SOA / SRV / PTR / CAA 记录，可指定自定义 DNS 服务器（验证解析生效情况） | `node:dns` |
+| `dns_propagation` | 用多个公共解析器并行查询同一条记录，报告哪些解析器一致、哪些不同——按记录内容分组，「6 个里 4 个一致」由数据实算；失败或超时的解析器如实报失败，不并进多数票 | `node:dns` |
 | `ping_host` | ICMP ping，报告丢包率与 min/avg/max 往返时延 | 系统 `ping` |
 | `check_port` | TCP 连接探测：**开放 / 关闭 / 被过滤 / 不可达**，含连接耗时 | `node:net` |
 | `check_tls` | 真实 TLS 握手；报告协议、加密套件、证书主体/签发者、有效期、**剩余天数**、SAN、SHA-256 指纹（只检查不信任，可诊断自签名/过期证书） | `node:tls` |
@@ -42,6 +43,7 @@ plugins:
 - "example.com 的 TLS 证书什么时候过期？"
 - "追踪到 1.1.1.1 的路由，找出丢包的位置"
 - "用 8.8.8.8 查询 example.com 的 A 记录"
+- "example.com 新加的 A 记录生效了吗？在几个公共解析器上对比一下"
 - "我们的公网 IP 是多少？在哪个城市？"
 - "example.com 是谁注册的？域名注册什么时候到期？"
 
@@ -62,6 +64,7 @@ plugins:
     includeGeo: true       # my_ip 是否附带归属地信息
     httpTimeoutMs: 5000    # my_ip HTTP 请求超时（1000–60000 毫秒）
     whoisTimeoutMs: 5000   # WHOIS 查询超时（TCP 43，1000–60000 毫秒）
+    propagationTimeoutMs: 5000  # dns_propagation 每个解析器的应答期限（100–60000 毫秒）
 ```
 
 ## 平台说明

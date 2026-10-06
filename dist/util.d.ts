@@ -9,6 +9,12 @@
  */
 /** Validate a probe target (hostname, IPv4 or IPv6). Throws with a clear message on garbage input. */
 export declare function assertValidTarget(input: string, what?: string): string;
+/**
+ * Validate a DNS resolver address. node's resolver API takes IP literals only
+ * (a hostname fails deep inside `setServers` with an opaque error), so reject
+ * hostnames here with a message that says what is wrong.
+ */
+export declare function assertValidResolver(input: string, what?: string): string;
 /** Validate a TCP port. */
 export declare function assertValidPort(port: unknown): number;
 /** Result of running an external probe binary. */

@@ -14,10 +14,12 @@ import { checkTls, type TlsResult } from './tls.ts'
 import { getPublicIp, type IpGeoResult } from './ip.ts'
 import { traceRoute, type TraceResult } from './route.ts'
 import { whoisLookup, type WhoisResult } from './whois.ts'
+import { dnsPropagation, type PropagationResult } from './propagation.ts'
 import type { ResolvedConfig } from './index.ts'
 
 export interface ToolSet {
   dns_lookup: ToolDefinition
+  dns_propagation: ToolDefinition
   ping_host: ToolDefinition
   check_port: ToolDefinition
   check_tls: ToolDefinition
@@ -34,6 +36,33 @@ function renderDns(value: unknown): string {
     return `no ${result.record} records found for ${result.host} (server: ${result.server})`
   }
   return `${result.answers.length} ${result.record} record(s) for ${result.host} (server: ${result.server}):\n${result.answers.map((a) => `  ${renderAnswer(a)}`).join('\n')}`
+}
+
+function renderPropagation(value: unknown): string {
+  const result = value as PropagationResult
+  const verdict = result.consistent
+    ? 'all answered resolvers agree'
+    : `${result.groups.length} distinct answer set(s)`
+  const lines = [
+    `dns propagation for ${result.host} ${result.record} across ${result.resolvers} resolvers: `
+    + `${result.responded} answered, ${verdict}`,
+  ]
+  for (const group of result.groups) {
+    const who = group.resolvers.join(', ')
+    lines.push(result.groups.length > 1 ? `  [${group.resolvers.length}/${result.responded}] ${who}:` : `  ${who}:`)
+    if (group.answers.length === 0) {
+      lines.push('      (no records in the answer)')
+    } else {
+      for (const answer of group.answers) lines.push(`      ${renderAnswer(answer)}`)
+    }
+  }
+  for (const probe of result.probes) {
+    if (probe.status === 'error') {
+      lines.push(`  ⚠️ ${probe.label} (${probe.server}): ${probe.error ?? 'no answer'}`)
+    }
+  }
+  if (result.note !== undefined) lines.push(`  note: ${result.note}`)
+  return lines.join('\n')
 }
 
 function renderPing(value: unknown): string {
@@ -137,6 +166,56 @@ export function buildNetdoctorTools(config: ResolvedConfig): ToolSet {
     },
     async execute(args: { host: string; record?: DnsRecordType; server?: string }) {
       return dnsLookup(args.host, args.record ?? 'A', args.server)
+    },
+  })
+
+  const dns_propagation = defineTool({
+    name: 'dns_propagation',
+    description: 'Query the same DNS record through several public resolvers in parallel and report where they agree and '
+      + 'where they differ — the fast way to judge whether a recent DNS change has propagated. Answers are grouped by '
+      + 'record content, so "4 of 6 agree" is counted from the data, and resolvers that fail or time out are reported as '
+      + 'failed instead of being folded into the majority. Read-only.',
+    parameters: {
+      host: { type: 'string', required: true, description: 'Hostname or IP address to look up.' },
+      record: { type: 'string', enum: [...DNS_RECORDS], description: 'Record type to query (default A).' },
+      resolvers: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional resolver IPs to probe instead of the built-in public set (Google 8.8.8.8, Cloudflare 1.1.1.1, '
+          + 'Quad9 9.9.9.9, OpenDNS 208.67.222.222, Level3 4.2.2.1, DNS.SB 185.222.222.222); at most 10, IP literals only.',
+      },
+      timeoutMs: { type: 'number', description: `Per-resolver answer deadline in ms (100–60000, default ${config.propagationTimeoutMs}).` },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          host: { type: 'string', required: true },
+          record: { type: 'string', required: true },
+          resolvers: { type: 'number', required: true },
+          responded: { type: 'number', required: true },
+          failed: { type: 'number', required: true },
+          consistent: { type: 'boolean', required: true },
+          consensus: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              fingerprint: { type: 'string', required: true },
+              resolvers: { type: 'array', required: true, items: { type: 'string' } },
+            },
+          },
+          groups: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+          probes: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+          note: { type: 'string' },
+        },
+      },
+      render: (_args: { host: string }, value: unknown) => [{ type: 'text', text: renderPropagation(value) }],
+    },
+    async execute(args: { host: string; record?: DnsRecordType; resolvers?: string[]; timeoutMs?: number }) {
+      const options: { resolvers?: string[]; timeoutMs?: number } = { timeoutMs: args.timeoutMs ?? config.propagationTimeoutMs }
+      if (args.resolvers !== undefined) options.resolvers = args.resolvers
+      return dnsPropagation(args.host, args.record ?? 'A', options)
     },
   })
 
@@ -377,5 +456,5 @@ export function buildNetdoctorTools(config: ResolvedConfig): ToolSet {
     },
   })
 
-  return { dns_lookup, ping_host, check_port, check_tls, trace_route, my_ip, whois }
+  return { dns_lookup, dns_propagation, ping_host, check_port, check_tls, trace_route, my_ip, whois }
 }
