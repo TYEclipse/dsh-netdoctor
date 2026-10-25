@@ -13,6 +13,7 @@ export interface ToolSet {
     ping_host: ToolDefinition;
     check_port: ToolDefinition;
     check_tls: ToolDefinition;
+    check_http: ToolDefinition;
     trace_route: ToolDefinition;
     my_ip: ToolDefinition;
     whois: ToolDefinition;

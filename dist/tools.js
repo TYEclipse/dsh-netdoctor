@@ -14,6 +14,7 @@ import { getPublicIp } from "./ip.js";
 import { traceRoute } from "./route.js";
 import { whoisLookup } from "./whois.js";
 import { dnsPropagation } from "./propagation.js";
+import { checkHttp, DEFAULT_BODY_LIMIT_BYTES, DEFAULT_MAX_REDIRECTS } from "./http.js";
 const DNS_RECORDS = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'SRV', 'PTR', 'CAA'];
 function renderDns(value) {
     const result = value;
@@ -77,6 +78,36 @@ function renderTls(value) {
         `  verified chain: ${result.authorized === true ? 'yes' : 'no'}${result.authorizationError === undefined ? '' : ` — ${result.authorizationError}`}`,
         `  sha256 fingerprint: ${result.cert.fingerprint256}`,
     ];
+    return lines.join('\n');
+}
+function renderHttp(value) {
+    const result = value;
+    if (result.error !== undefined) {
+        return `check_http ${result.url}: ${result.error}`;
+    }
+    const lines = [
+        `${result.status} ${result.statusText} — ${result.finalUrl} (HTTP/${result.httpVersion ?? 'unknown'} ${result.method}, ${result.timing.totalMs} ms)`,
+    ];
+    for (const hop of result.redirectChain)
+        lines.push(`  → ${hop.status} ${hop.location}`);
+    const marks = [];
+    if (result.timing.dnsMs !== undefined)
+        marks.push(`dns ${result.timing.dnsMs} ms`);
+    if (result.timing.connectMs !== undefined)
+        marks.push(`connect ${result.timing.connectMs} ms`);
+    if (result.timing.tlsMs !== undefined)
+        marks.push(`tls ${result.timing.tlsMs} ms`);
+    if (result.timing.ttfbMs !== undefined)
+        marks.push(`ttfb ${result.timing.ttfbMs} ms`);
+    marks.push(`total ${result.timing.totalMs} ms`);
+    lines.push(`  timing: ${marks.join(' / ')}`);
+    for (const [name, headerValue] of Object.entries(result.headers))
+        lines.push(`  ${name}: ${headerValue}`);
+    const body = `  body: ${result.bodyBytes} byte(s) read${result.bodyTruncated ? ' (truncated at the body limit)' : ''}`;
+    const cookies = result.setCookieCount > 0 ? `, ${result.setCookieCount} Set-Cookie header(s) (values not shown)` : '';
+    lines.push(body + cookies);
+    if (result.note !== undefined)
+        lines.push(`  note: ${result.note}`);
     return lines.join('\n');
 }
 function renderTrace(value) {
@@ -314,6 +345,72 @@ export function buildNetdoctorTools(config) {
             return checkTls(args.host, args.port ?? 443, args.timeoutMs ?? config.timeoutMs);
         },
     });
+    const check_http = defineTool({
+        name: 'check_http',
+        description: 'Fetch one HTTP(S) URL the way a browser would — following redirects — and report the status line, '
+            + 'the redirect chain, which layer is slow (DNS / TCP connect / TLS handshake / time to first byte / total, '
+            + 'measured on the socket), the response headers that matter (content-type, cache-control, and the security '
+            + 'headers HSTS / CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy / CORS) and how much body '
+            + 'was read. Redirects are followed only to http/https targets, and cookie values are counted, never shown. '
+            + 'Read-only.',
+        parameters: {
+            url: { type: 'string', required: true, description: 'Absolute http:// or https:// URL to check (credentials in the URL are rejected).' },
+            method: { type: 'string', enum: ['GET', 'HEAD'], description: 'Request method (default GET). HEAD skips the body.' },
+            maxRedirects: { type: 'number', description: `How many redirects to follow (0–10, default ${DEFAULT_MAX_REDIRECTS}).` },
+            bodyLimitBytes: { type: 'number', description: `Stop reading the body after this many bytes (1–1000000, default ${DEFAULT_BODY_LIMIT_BYTES}).` },
+            timeoutMs: { type: 'number', description: `Per-request deadline in ms (100–60000, default ${config.httpTimeoutMs}).` },
+            insecure: { type: 'boolean', description: 'Accept an invalid certificate instead of reporting it (default false; for inspecting a known-bad endpoint).' },
+        },
+        output: {
+            schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    url: { type: 'string', required: true },
+                    finalUrl: { type: 'string', required: true },
+                    method: { type: 'string', required: true, enum: ['GET', 'HEAD'] },
+                    reachable: { type: 'boolean', required: true },
+                    status: { type: 'number', required: true },
+                    statusText: { type: 'string', required: true },
+                    httpVersion: { type: 'string' },
+                    redirected: { type: 'number', required: true },
+                    redirectChain: { type: 'array', required: true, items: { type: 'object', additionalProperties: true } },
+                    headers: { type: 'object', required: true, additionalProperties: true },
+                    headersTruncated: { type: 'number', required: true },
+                    setCookieCount: { type: 'number', required: true },
+                    bodyBytes: { type: 'number', required: true },
+                    bodyTruncated: { type: 'boolean', required: true },
+                    timing: {
+                        type: 'object',
+                        required: true,
+                        additionalProperties: false,
+                        properties: {
+                            dnsMs: { type: 'number' },
+                            connectMs: { type: 'number' },
+                            tlsMs: { type: 'number' },
+                            ttfbMs: { type: 'number' },
+                            totalMs: { type: 'number', required: true },
+                        },
+                    },
+                    note: { type: 'string' },
+                    error: { type: 'string' },
+                },
+            },
+            render: (_args, value) => [{ type: 'text', text: renderHttp(value) }],
+        },
+        async execute(args) {
+            const options = { timeoutMs: args.timeoutMs ?? config.httpTimeoutMs };
+            if (args.method !== undefined)
+                options.method = args.method;
+            if (args.maxRedirects !== undefined)
+                options.maxRedirects = args.maxRedirects;
+            if (args.bodyLimitBytes !== undefined)
+                options.bodyLimitBytes = args.bodyLimitBytes;
+            if (args.insecure !== undefined)
+                options.insecure = args.insecure;
+            return checkHttp(args.url, options);
+        },
+    });
     const trace_route = defineTool({
         name: 'trace_route',
         description: 'Trace the network path to a host hop by hop using the system traceroute utility (tracert on '
@@ -435,6 +532,6 @@ export function buildNetdoctorTools(config) {
             return whoisLookup(args.domain, args.server, config.whoisTimeoutMs);
         },
     });
-    return { dns_lookup, dns_propagation, ping_host, check_port, check_tls, trace_route, my_ip, whois };
+    return { dns_lookup, dns_propagation, ping_host, check_port, check_tls, check_http, trace_route, my_ip, whois };
 }
 //# sourceMappingURL=tools.js.map

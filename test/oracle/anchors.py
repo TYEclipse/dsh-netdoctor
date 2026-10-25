@@ -12,7 +12,14 @@ assertions:
   test/tls.test.ts          — certificate days-remaining arithmetic (10 / -10 / 0)
   test/tools.test.ts        — config defaults and overrides (3000 / 1000 / 4 / 2 / 20 / 5000)
                               plus a rendered propagation summary (3 resolvers, 2 answered)
+                              and a rendered http summary (status 200, redirect 302,
+                              dns 3 / connect 5 / ttfb 20 / total 30 ms, 512 body bytes)
   test/propagation.test.ts  — agreement tallies per scenario (PROPAGATION_SCENARIOS)
+  test/http.test.ts         — check_http policy constants (5 redirects / 8192 body bytes /
+                              200-char header cap), scheme default ports (80 / 443),
+                              fixture shapes (2-hop redirect chain, 100000-byte body,
+                              1024-byte read limit, 500-char header) and RFC 3986
+                              redirect resolution (urljoin as the ruler)
 
 Every number is derived here from primitives — protocol constants, datetime
 arithmetic, an independent traceroute-line regex, an independent propagation
@@ -32,7 +39,9 @@ import re
 import socket
 import subprocess
 import sys
+from http import HTTPStatus
 from pathlib import Path
+from urllib.parse import urljoin
 
 # ---------------------------------------------------------------------------
 # Published anchors (the numbers the tests assert). `--check` recomputes each
@@ -66,6 +75,33 @@ ANCHORS = {
     "render.propagation_sets": 2,
     # built-in resolver set (parsed back out of src/propagation.ts)
     "propagation.default_resolvers": 6,
+    # check_http — policy constants published by src/http.ts (read back by
+    # read_ts_const, so the tests and the implementation cannot drift apart)
+    "http.default_max_redirects": 5,
+    "http.default_body_limit_bytes": 8192,
+    "http.header_value_cap": 200,
+    # check_http — protocol defaults for the two schemes
+    "http.default_port_http": 80,
+    "http.default_port_https": 443,
+    # check_http — fixture shapes used by test/http.test.ts: the redirect route
+    # the test server implements, the oversized body, the small read limit and
+    # the long header value (the cap can only be observed if cap < value length)
+    "http.redirect_chain_hops": 2,
+    "http.body_fixture_bytes": 100000,
+    "http.small_limit_bytes": 1024,
+    "http.long_header_length": 500,
+    "http.cookie_fixture_count": 2,
+    # a 4xx must stay a reachable result, not an error
+    "http.not_found_status": 404,
+    # check_http — rendered summary numbers asserted in test/tools.test.ts
+    "http.render_status": 200,
+    "http.render_redirect_status": 302,
+    "http.render_dns_ms": 3,
+    "http.render_connect_ms": 5,
+    "http.render_ttfb_ms": 20,
+    "http.render_total_ms": 30,
+    "http.render_body_bytes": 512,
+    "http.render_cookie_count": 1,
 }
 
 TRACE_LINE = " 3  router.example.com (10.0.0.1)  12.345 ms"
@@ -284,6 +320,76 @@ def fingerprint_facts() -> dict[str, bool]:
 
 
 # ---------------------------------------------------------------------------
+# 6. check_http — policy constants (read back from src/http.ts) plus redirect
+#    resolution derived with an independent RFC 3986 implementation
+#    (urllib.parse.urljoin, sharing no code with the TypeScript's `new URL()`).
+# ---------------------------------------------------------------------------
+
+# The redirect route the test server implements in test/http.test.ts: each hop
+# is (path, status, Location as sent). Published here so "the chain is 2 hops"
+# has an authoring source instead of being a number copied into the test.
+HTTP_REDIRECT_ROUTE: list[tuple[str, int, str]] = [
+    ("/a", 302, "/b"),
+    ("/b", 301, "c"),
+]
+
+# (base URL, Location header, the URL RFC 3986 says you end up at)
+REDIRECT_JOIN_CASES: list[tuple[str, str, str]] = [
+    ("http://example.com/dir/start", "../up", "http://example.com/up"),
+    ("http://example.com/b", "c", "http://example.com/c"),
+    ("http://example.com/a/b", "/root", "http://example.com/root"),
+]
+
+
+def read_ts_const(name: str, source: Path) -> int | None:
+    """Read `export const <name> = <int>` out of a TypeScript source file."""
+    text = source.read_text(encoding="utf-8")
+    match = re.search(rf"export const {re.escape(name)}\s*=\s*([\d_]+)", text)
+    if match is None:
+        return None
+    return int(match.group(1).replace("_", ""))
+
+
+def derive_http_constants() -> dict[str, int]:
+    source = Path("src/http.ts")
+    if not source.is_file():
+        raise AssertionError("src/http.ts not found — run this oracle from the repository root")
+    out: dict[str, int] = {}
+    for const, anchor in (
+        ("DEFAULT_MAX_REDIRECTS", "http.default_max_redirects"),
+        ("DEFAULT_BODY_LIMIT_BYTES", "http.default_body_limit_bytes"),
+        ("HEADER_VALUE_CAP", "http.header_value_cap"),
+    ):
+        value = read_ts_const(const, source)
+        if value is None:
+            raise AssertionError(f"could not read {const} from src/http.ts")
+        out[anchor] = value
+    return out
+
+
+def derive_redirect_joins() -> list[tuple[str, str, str]]:
+    """Resolve every Location the way RFC 3986 does, with urljoin as the ruler."""
+    return [(base, location, urljoin(base, location)) for base, location, _ in REDIRECT_JOIN_CASES]
+
+
+def http_invariants() -> list[str]:
+    problems: list[str] = []
+    if ANCHORS["http.small_limit_bytes"] >= ANCHORS["http.body_fixture_bytes"]:
+        problems.append("the body read limit must be smaller than the fixture body, or truncation is unobservable")
+    if ANCHORS["http.long_header_length"] <= ANCHORS["http.header_value_cap"]:
+        problems.append("the long header fixture must exceed the cap, or the cap is unobservable")
+    marks = ["http.render_dns_ms", "http.render_connect_ms", "http.render_ttfb_ms", "http.render_total_ms"]
+    values = [ANCHORS[key] for key in marks]
+    if any(later < earlier for earlier, later in zip(values, values[1:])):
+        problems.append(f"timing marks are not cumulative/monotonic: {values}")
+    if ANCHORS["http.render_redirect_status"] not in (301, 302, 303, 307, 308):
+        problems.append("the rendered redirect status is not a redirect status")
+    if ANCHORS["http.redirect_chain_hops"] != len(HTTP_REDIRECT_ROUTE):
+        problems.append("published redirect chain length disagrees with the published route table")
+    return problems
+
+
+# ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
 
@@ -320,6 +426,12 @@ def render(checks: list[str] | None = None, total: int = 0) -> str:
         )
     lines.append("")
     lines.append("[fingerprint facts] " + json.dumps(fingerprint_facts(), sort_keys=True))
+    lines.append("")
+    lines.append("[check_http] redirect route + RFC 3986 resolution (urljoin as the ruler)")
+    for path, status, location in HTTP_REDIRECT_ROUTE:
+        lines.append(f"  route {path:<12} {status} Location: {location!r}")
+    for base, location, resolved in derive_redirect_joins():
+        lines.append(f"  {base} + {location!r} → {resolved}")
     if checks is not None:
         lines.append("")
         lines.append(f"[--check] {total} verification(s): " + ("ALL PASS" if not checks else f"{len(checks)} FAILURE(S)"))
@@ -376,6 +488,16 @@ def run_checks() -> tuple[int, list[str]]:
         total += 1
         if not fact:
             problems.append(f"fingerprint fact {name} is false")
+
+    # ---- check_http ------------------------------------------------------
+    for key, value in derive_http_constants().items():
+        expect(key, value, ANCHORS[key])
+    expect("http.default_port_http", socket.getservbyname("http", "tcp"), ANCHORS["http.default_port_http"])
+    expect("http.default_port_https", socket.getservbyname("https", "tcp"), ANCHORS["http.default_port_https"])
+    expect("http.not_found_status", HTTPStatus.NOT_FOUND.value, ANCHORS["http.not_found_status"])
+    for base, location, resolved in derive_redirect_joins():
+        expect(f"redirect {base!r} + {location!r}", resolved, next(published for b, l, published in REDIRECT_JOIN_CASES if b == base and l == location))
+    problems.extend(http_invariants())
     return total, problems
 
 

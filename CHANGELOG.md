@@ -2,6 +2,10 @@
 
 > 版本口径：patch 修 bug/补测试｜minor 新增用户可见功能｜major 破坏性变更。安装：`dsh plugin --profile web add github:TYEclipse/dsh-netdoctor`
 
+## [0.4.0] — 2026-10-26
+### Minor · R80
+- [自主进化] R80 新增 check_http（HTTP(S) 端点检查：跳转链 + 分阶段计时 + 审计型响应头 + 有界正文读取）
+
 ## [0.3.0] — 2026-10-07
 ### Minor · R62
 - [自主进化] R62 新增 dns_propagation（多解析器 DNS 传播对比 + 失败/超时如实上报）；dns_lookup 的自定义解析器改为 IP 字面量校验

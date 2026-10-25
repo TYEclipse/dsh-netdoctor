@@ -7,6 +7,7 @@
  *   ping_host       — ICMP ping via the system ping utility, parsed summary
  *   check_port      — TCP connect probe: open / closed / filtered
  *   check_tls       — TLS handshake + leaf certificate identity, validity, days to expiry
+ *   check_http      — HTTP(S) request with redirect chain and per-phase timing (dns/connect/tls/ttfb/total)
  *   trace_route     — traceroute via the system traceroute/tracert utility
  *   my_ip           — public IP address with optional geo info (ip-api.com, keyless)
  *   whois           — WHOIS registry lookup via TCP port 43 with IANA referral discovery

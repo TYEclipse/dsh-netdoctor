@@ -36,9 +36,9 @@ describe('resolveConfig', () => {
 describe('buildNetdoctorTools', () => {
   const tools = buildNetdoctorTools(resolveConfig({}))
 
-  it('exposes all eight probes under their canonical names', () => {
+  it('exposes all nine probes under their canonical names', () => {
     expect(Object.keys(tools).sort()).toEqual(
-      ['check_port', 'check_tls', 'dns_lookup', 'dns_propagation', 'my_ip', 'ping_host', 'trace_route', 'whois'].sort(),
+      ['check_http', 'check_port', 'check_tls', 'dns_lookup', 'dns_propagation', 'my_ip', 'ping_host', 'trace_route', 'whois'].sort(),
     )
   })
 
@@ -171,5 +171,59 @@ describe('buildNetdoctorTools', () => {
       },
     )
     expect(block[0]?.text).toContain('(no records in the answer)')
+  })
+
+  it('renders an http result with its redirect chain and timing marks', () => {
+    const block = tools.check_http.output.render(
+      { url: 'http://example.com/a' },
+      {
+        url: 'http://example.com/a',
+        finalUrl: 'http://example.com/c',
+        method: 'GET',
+        reachable: true,
+        status: 200,
+        statusText: 'OK',
+        httpVersion: '1.1',
+        redirected: 1,
+        redirectChain: [{ url: 'http://example.com/a', status: 302, statusText: 'Found', location: 'http://example.com/c' }],
+        headers: { 'content-type': 'text/html' },
+        headersTruncated: 0,
+        setCookieCount: 1,
+        bodyBytes: 512,
+        bodyTruncated: false,
+        timing: { dnsMs: 3, connectMs: 5, ttfbMs: 20, totalMs: 30 },
+      },
+    )
+    const text = block[0]?.text ?? ''
+    expect(block[0]?.type).toBe('text')
+    expect(text).toContain('200 OK — http://example.com/c (HTTP/1.1 GET, 30 ms)')
+    expect(text).toContain('→ 302 http://example.com/c')
+    expect(text).toContain('timing: dns 3 ms / connect 5 ms / ttfb 20 ms / total 30 ms')
+    expect(text).toContain('body: 512 byte(s) read')
+    expect(text).toContain('1 Set-Cookie header(s) (values not shown)')
+  })
+
+  it('renders an http failure as a single line naming the URL', () => {
+    const block = tools.check_http.output.render(
+      { url: 'http://example.com/' },
+      {
+        url: 'http://example.com/',
+        finalUrl: 'http://example.com/',
+        method: 'GET',
+        reachable: false,
+        status: 0,
+        statusText: '',
+        redirected: 0,
+        redirectChain: [],
+        headers: {},
+        headersTruncated: 0,
+        setCookieCount: 0,
+        bodyBytes: 0,
+        bodyTruncated: false,
+        timing: { totalMs: 12 },
+        error: 'connection refused on port 80',
+      },
+    )
+    expect(block[0]).toEqual({ type: 'text', text: 'check_http http://example.com/: connection refused on port 80' })
   })
 })

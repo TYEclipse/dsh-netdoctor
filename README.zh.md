@@ -1,6 +1,6 @@
 # dsh-netdoctor 🩺 网络诊断工具箱
 
-DeepSeek Harness (dsh) 插件：8 个只读网络探针，**零运行时依赖**（仅 Node.js 内置模块）。
+DeepSeek Harness (dsh) 插件：9 个只读网络探针，**零运行时依赖**（仅 Node.js 内置模块）。
 
 让 Agent 直接排查常见网络问题——"服务器连不上？端口通不通？证书何时过期？公共 DNS 返回了什么？域名是谁注册的、何时到期？"——而不必猜测或绕道 shell 命令。
 
@@ -13,6 +13,7 @@ DeepSeek Harness (dsh) 插件：8 个只读网络探针，**零运行时依赖**
 | `ping_host` | ICMP ping，报告丢包率与 min/avg/max 往返时延 | 系统 `ping` |
 | `check_port` | TCP 连接探测：**开放 / 关闭 / 被过滤 / 不可达**，含连接耗时 | `node:net` |
 | `check_tls` | 真实 TLS 握手；报告协议、加密套件、证书主体/签发者、有效期、**剩余天数**、SAN、SHA-256 指纹（只检查不信任，可诊断自签名/过期证书） | `node:tls` |
+| `check_http` | 抓取一个 HTTP(S) URL 并自动跟随跳转：状态行、**跳转链**（相对 `Location` 按 RFC 3986 解析）、**分阶段耗时**（DNS / TCP 连接 / TLS 握手 / 首字节 / 总耗时，同一时钟的累计刻度）、值得审计的响应头（content-type、cache-control、HSTS、CSP、X-Frame-Options、X-Content-Type-Options、Referrer-Policy、CORS）以及读到多少正文。Cookie 只计数、不回显取值 | `node:http` / `node:https` |
 | `trace_route` | 逐跳路由追踪，含每跳时延 | 系统 `traceroute` / `tracert` |
 | `my_ip` | 本机公网 IP，可选归属地信息（国家/地区/城市/运营商/AS/时区/坐标，ip-api.com 免费免密钥），失败自动降级为纯 IP | HTTP(S) GET |
 | `whois` | WHOIS 注册信息查询（经典 TCP 43 协议）：经 whois.iana.org 引用链自动发现注册局服务器（附常见 TLD→注册局兜底表，IP 字面量走 ARIN），返回原始 WHOIS 文本 + 结构化摘要（注册商/状态/创建·更新·到期日期/NS 服务器） | `node:net` 裸 socket |
@@ -24,6 +25,7 @@ DeepSeek Harness (dsh) 插件：8 个只读网络探针，**零运行时依赖**
 - 每个探针都有**硬超时**，绝不拖死会话。
 - `whois` 仅向注册局服务器发起 TCP 43 出站连接并发送单行查询——无凭据、无第三方 API 密钥。
 - `my_ip` 的归属地查询可逐次关闭（`includeGeo: false`）或配置全局关闭，隐私可控。
+- `check_http` 从不做认证：URL 里带账号密码会直接被拒，Cookie 只计数不回显，跳转只跟随到 `http`/`https` 目标。
 
 ## 安装
 
@@ -41,6 +43,7 @@ plugins:
 
 - "检查 db.internal.example.com 的 5432 端口是否开放"
 - "example.com 的 TLS 证书什么时候过期？"
+- "https://example.com/login 跳转太多，看看跳转链和慢在哪一层"
 - "追踪到 1.1.1.1 的路由，找出丢包的位置"
 - "用 8.8.8.8 查询 example.com 的 A 记录"
 - "example.com 新加的 A 记录生效了吗？在几个公共解析器上对比一下"
