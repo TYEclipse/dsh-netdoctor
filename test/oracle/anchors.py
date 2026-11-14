@@ -41,6 +41,7 @@ import subprocess
 import sys
 from http import HTTPStatus
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin
 
 # ---------------------------------------------------------------------------
@@ -390,6 +391,346 @@ def http_invariants() -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# email_dns (R100): mail-readiness parsing, written from the RFC text and
+# sharing no code with the TypeScript. Every number the email tests assert is
+# printed here, so an expectation can never come from reading the implementation.
+# ---------------------------------------------------------------------------
+
+# RFC 7208 §4.6.4: one evaluation may cause at most 10 DNS queries.
+SPF_LIMIT = 10
+# RFC 7489 §6.3: pct defaults to 100 when the tag is absent.
+DMARC_DEFAULT_PCT = 100
+DMARC_POLICIES = ("none", "quarantine", "reject")
+
+# Fixtures: DNS answers per case, exactly as the fake resolver in email.test.ts
+# returns them.
+EMAIL_CASES: dict[str, dict[str, Any]] = {
+    "healthy": {
+        "mx": [("mx1.mail.test", 20), ("mx2.mail.test", 10)],
+        "a": ["192.0.2.10"],
+        "apex_txt": [
+            "v=spf1 a mx include:_spf.test ip4:192.0.2.0/24 exists:chk.test -all",
+            "google-site-verification=abc",
+        ],
+        "dmarc_txt": ["v=DMARC1; p=reject; sp=quarantine; pct=50; rua=mailto:a@test,mailto:b@test; ruf=mailto:f@test"],
+        "dkim": {"sel1": ["v=DKIM1; k=rsa; p=MIIBIjANBg"]},
+    },
+    "permissive": {
+        "mx": [("mx1.mail.test", 10)],
+        "a": ["192.0.2.10"],
+        "apex_txt": [
+            "v=spf1 include:a.test include:b.test include:c.test include:d.test include:e.test "
+            "include:f.test include:g.test a mx ptr exists:z.test +all",
+            "v=spf1 -all",
+        ],
+        "dmarc_txt": ["v=DMARC1; p=none; pct=100"],
+        "dkim": {},
+    },
+    "null-mx": {
+        "mx": [(".", 0)],
+        "a": ["192.0.2.10"],
+        "apex_txt": [],
+        "dmarc_txt": [],
+        "dkim": {},
+    },
+    "no-mx": {
+        "mx": [],
+        "a": ["192.0.2.11", "192.0.2.12"],
+        "apex_txt": ["v=spf1 redirect=_spf.test"],
+        "dmarc_txt": [],
+        "dkim": {},
+    },
+    "odd-terms": {
+        "mx": [("mx1.mail.test", 10)],
+        "a": [],
+        "apex_txt": ["v=spf1 mx:mail.test ?all foo:bar a:host.test/24"],
+        "dmarc_txt": ["v=DMARC1; p=quarantine; p=reject"],
+        "dkim": {"revoked": ["v=DKIM1; k=rsa; p="], "absent": []},
+    },
+    "multi-string": {
+        "mx": [("mx1.mail.test", 10)],
+        "a": [],
+        # One TXT record whose character-strings were split at 255 bytes; the
+        # fake resolver in the test hands back the two pieces separately and
+        # src/email.ts must join them without a separator (RFC 7208 §3.3).
+        "apex_txt": ["v=spf1 include:_spf.test -all"],
+        "dmarc_txt": ["v=DMARC1;p=reject"],
+        "dkim": {},
+    },
+    "nxdomain": {
+        # Nothing resolves at all: no MX, no A/AAAA, no TXT.
+        "mx": [],
+        "a": [],
+        "apex_txt": [],
+        "dmarc_txt": [],
+        "dkim": {},
+    },
+}
+
+EMAIL_DKIM_SELECTORS = {
+    "healthy": ["sel1"],
+    "permissive": [],
+    "null-mx": [],
+    "no-mx": [],
+    "odd-terms": ["revoked", "absent"],
+    "multi-string": [],
+    "nxdomain": [],
+}
+
+
+def spf_mechanisms(record: str) -> list[str]:
+    """Split an SPF record into terms, asserting the version tag is first (RFC 7208 §4.5)."""
+    tokens = record.split()
+    if not tokens or tokens[0].lower() != "v=spf1":
+        raise AssertionError(f"not an SPF record: {record!r}")
+    return tokens[1:]
+
+
+def classify_spf_term(term: str) -> tuple[str, int, bool]:
+    """Return (kind, dns_lookups_caused, is_unknown) for one SPF term."""
+    body = term.lstrip("+-~?")
+    if body == "" or body == "all":
+        return ("all", 0, False)
+    if body.startswith("ip4:") or body.startswith("ip6:"):
+        return ("ip", 0, False)
+    if "=" in body:
+        key = body.split("=", 1)[0].lower()
+        if key == "redirect":
+            return ("redirect", 1, False)
+        if key == "exp":
+            return ("exp", 0, False)
+        return ("modifier", 0, False)
+    head = re.split(r"[:/]", body)[0]
+    if head in ("include", "exists", "a", "mx", "ptr"):
+        return (head, 1, False)
+    return ("unknown", 0, True)
+
+
+def parse_spf(record: str) -> dict[str, object]:
+    terms = spf_mechanisms(record)
+    lookups = 0
+    includes: list[str] = []
+    unknown: list[str] = []
+    redirect = None
+    all_index = -1
+    all_qualifier = None
+    for index, term in enumerate(terms):
+        kind, caused, is_unknown = classify_spf_term(term)
+        lookups += caused
+        if is_unknown:
+            unknown.append(term)
+        body = term.lstrip("+-~?")
+        if body == "all":
+            if all_index < 0:
+                all_index = index
+                all_qualifier = term[0] if term[0] in "+-~?" else "+"
+            continue
+        if body.lower().startswith("include:"):
+            includes.append(body.split(":", 1)[1])
+        if body.lower().startswith("redirect="):
+            redirect = body.split("=", 1)[1]
+    return {
+        "terms": len(terms),
+        "lookups": lookups,
+        "all_qualifier": all_qualifier,
+        "all_last": all_index >= 0 and all_index == len(terms) - 1,
+        "includes": includes,
+        "redirect": redirect,
+        "unknown": unknown,
+        "exceeds": lookups > SPF_LIMIT,
+    }
+
+
+def parse_dmarc(record: str) -> dict[str, object]:
+    tags: dict[str, str] = {}
+    order: list[str] = []
+    duplicates: list[str] = []
+    for segment in record.split(";"):
+        part = segment.strip()
+        if part == "" or "=" not in part:
+            continue
+        key, _, value = part.partition("=")
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "":
+            continue
+        if key in tags:
+            duplicates.append(key)
+            continue
+        tags[key] = value
+        order.append(key)
+    version_first = bool(order) and order[0] == "v" and tags.get("v", "").lower() == "dmarc1"
+    return {"tags": tags, "order": order, "version_first": version_first, "duplicates": duplicates}
+
+
+def sort_mx(records: list[tuple[str, int]]) -> list[str]:
+    """MX order is by ascending priority, ties broken by exchange (deterministic)."""
+    return [f"{priority}:{exchange}" for exchange, priority in sorted(records, key=lambda item: (item[1], item[0]))]
+
+
+def email_findings(case: dict[str, Any], selectors: list[str]) -> list[str]:
+    """Reproduce the finding pipeline of src/email.ts from the parsed facts."""
+    found: list[tuple[int, str]] = []
+
+    def add(severity: int, code: str) -> None:
+        found.append((severity, code))
+
+    mx_records = [(str(exchange), int(priority)) for exchange, priority in case["mx"]]
+    apex = [str(record) for record in case["apex_txt"]]
+    dmarc_records = [str(record) for record in case["dmarc_txt"]]
+    spf_records = [record for record in apex if record.lower().startswith("v=spf1")]
+    null_mx = len(mx_records) == 1 and mx_records[0][1] == 0 and mx_records[0][0] in (".", "")
+
+    if null_mx:
+        add(2, "mx-null")
+    elif len(mx_records) == 0:
+        # No MX and no address to fall back to: the name itself does not
+        # resolve, which is a different diagnosis from "MX is unset".
+        if len(case["a"]) == 0:
+            add(0, "domain-not-found")
+        else:
+            add(1, "mx-missing")
+
+    if spf_records:
+        spf = parse_spf(spf_records[0])
+        if len(spf_records) > 1:
+            add(0, "spf-multiple")
+        if spf["exceeds"]:
+            add(1, "spf-too-many-lookups")
+        if spf["all_qualifier"] is None:
+            add(2, "spf-no-all")
+        else:
+            if spf["all_qualifier"] in ("+", "?"):
+                add(1, "spf-permissive")
+            if not spf["all_last"]:
+                add(1, "spf-all-not-last")
+        if spf["unknown"]:
+            add(1, "spf-unknown-term")
+    else:
+        add(1, "spf-missing")
+
+    if dmarc_records:
+        dmarc = parse_dmarc(dmarc_records[0])
+        tags = dmarc["tags"]
+        if len(dmarc_records) > 1:
+            add(0, "dmarc-multiple")
+        if not dmarc["version_first"]:
+            add(1, "dmarc-version-not-first")
+        policy = tags.get("p")
+        if policy is None:
+            add(0, "dmarc-policy-missing")
+        elif policy not in DMARC_POLICIES:
+            add(0, "dmarc-policy-invalid")
+        elif policy == "none":
+            add(2, "dmarc-policy-none")
+        pct = tags.get("pct")
+        if pct is not None and pct.isdigit() and int(pct) < DMARC_DEFAULT_PCT:
+            add(2, "dmarc-pct-partial")
+    else:
+        add(1, "dmarc-missing")
+
+    for selector in selectors:
+        records = [str(item) for item in (case.get("dkim") or {}).get(selector, [])]  # type: ignore[union-attr]
+        key_record = next((record for record in records if re.search(r"(?:^|;)\s*p\s*=", record, re.I)), None)
+        if key_record is None:
+            add(1, "dkim-missing")
+            continue
+        key_tags = {k.strip().lower(): v.strip() for k, _, v in (part.partition("=") for part in key_record.split(";") if "=" in part)}
+        if key_tags.get("p", "") == "":
+            add(1, "dkim-revoked")
+    if not selectors:
+        add(2, "dkim-not-checked")
+
+    return [code for _severity, code in sorted(found, key=lambda item: item[0])]
+
+
+def email_facts(case_name: str) -> dict[str, Any]:
+    case = EMAIL_CASES[case_name]
+    selectors = EMAIL_DKIM_SELECTORS[case_name]
+    mx_records = [(str(exchange), int(priority)) for exchange, priority in case["mx"]]
+    apex = [str(record) for record in case["apex_txt"]]
+    dmarc_records = [str(record) for record in case["dmarc_txt"]]
+    spf_records = [record for record in apex if record.strip().lower().startswith("v=spf1")]
+    null_mx = len(mx_records) == 1 and mx_records[0][1] == 0 and mx_records[0][0] in (".", "")
+
+    facts: dict[str, Any] = {
+        "mx_order": sort_mx(mx_records),
+        "null_mx": null_mx,
+        "implicit_mx": len(mx_records) == 0 and not null_mx,
+        "mail_accepted": (not null_mx) and (len(mx_records) > 0 or len(case["a"]) > 0),
+        "spf_records": len(spf_records),
+        "findings": email_findings(case, selectors),
+    }
+    if spf_records:
+        spf = parse_spf(spf_records[0])
+        facts["spf_terms"] = spf["terms"]
+        facts["spf_lookups"] = spf["lookups"]
+        facts["spf_all_qualifier"] = spf["all_qualifier"]
+        facts["spf_all_last"] = spf["all_last"]
+        facts["spf_includes"] = spf["includes"]
+        facts["spf_redirect"] = spf["redirect"]
+        facts["spf_unknown"] = spf["unknown"]
+        facts["spf_exceeds"] = spf["exceeds"]
+    if dmarc_records:
+        dmarc = parse_dmarc(dmarc_records[0])
+        tags = dmarc["tags"]
+        facts["dmarc_policy"] = tags.get("p")
+        facts["dmarc_sp"] = tags.get("sp")
+        facts["dmarc_pct"] = int(tags["pct"]) if tags.get("pct", "").isdigit() else None
+        facts["dmarc_rua"] = len([uri for uri in tags.get("rua", "").split(",") if uri.strip()])
+        facts["dmarc_ruf"] = len([uri for uri in tags.get("ruf", "").split(",") if uri.strip()])
+        facts["dmarc_version_first"] = dmarc["version_first"]
+        facts["dmarc_duplicates"] = dmarc["duplicates"]
+    facts["dkim"] = [
+        {
+            "selector": selector,
+            "found": any(re.search(r"(?:^|;)\s*p\s*=", str(record), re.I) for record in (case.get("dkim") or {}).get(selector, [])),
+        }
+        for selector in selectors
+    ]
+    return facts
+
+
+def email_invariants() -> list[str]:
+    """Facts that must hold no matter which fixture is looked at."""
+    problems: list[str] = []
+    if SPF_LIMIT != 10:
+        problems.append("the SPF DNS-lookup limit is 10 (RFC 7208 §4.6.4)")
+    if DMARC_DEFAULT_PCT != 100:
+        problems.append("the DMARC pct default is 100 (RFC 7489 §6.3)")
+    # include/a/mx/ptr/exists and redirect= are the only DNS-querying terms.
+    for term, expected in (
+        ("include:x.test", 1), ("exists:x.test", 1), ("a", 1), ("a:x.test/24", 1), ("mx", 1),
+        ("mx:x.test", 1), ("ptr", 1), ("ptr:x.test", 1), ("redirect=x.test", 1),
+        ("ip4:192.0.2.1", 0), ("ip6:2001:db8::1", 0), ("all", 0), ("-all", 0), ("exp=x.test", 0),
+    ):
+        kind, caused, unknown = classify_spf_term(term)
+        if caused != expected:
+            problems.append(f"spf term {term!r} classified as {kind} with {caused} lookup(s), expected {expected}")
+        if unknown:
+            problems.append(f"spf term {term!r} was classified as unknown")
+    # Unknown mechanisms must be flagged rather than silently ignored.
+    if not classify_spf_term("foo:bar")[2]:
+        problems.append("an unrecognised SPF term must be reported as unknown")
+    # Version-first is a position rule, not a substring rule (RFC 7489 §6.6.1).
+    if parse_dmarc("p=reject; v=DMARC1")["version_first"]:
+        problems.append("a DMARC record whose v tag is not first must not count as version-first")
+    if not parse_dmarc("v=DMARC1; p=reject")["version_first"]:
+        problems.append("a DMARC record starting with v=DMARC1 must count as version-first")
+    # Null MX is exactly one "0 ." record (RFC 7505).
+    for records, expected in (
+        ([(".", 0)], True),
+        ([(".", 10)], False),
+        ([(".", 0), ("mx.test", 10)], False),
+        ([], False),
+    ):
+        actual = len(records) == 1 and records[0][1] == 0 and records[0][0] == "."
+        if actual != expected:
+            problems.append(f"null-MX detection for {records!r} gave {actual}, expected {expected}")
+    return problems
+
+
+# ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
 
@@ -432,6 +773,25 @@ def render(checks: list[str] | None = None, total: int = 0) -> str:
         lines.append(f"  route {path:<12} {status} Location: {location!r}")
     for base, location, resolved in derive_redirect_joins():
         lines.append(f"  {base} + {location!r} → {resolved}")
+    lines.append("")
+    lines.append("[email_dns] mail readiness per fixture (mx order / null / implicit / accepted / spf / dmarc / findings)")
+    for case_name in EMAIL_CASES:
+        facts = email_facts(case_name)
+        lines.append(
+            f"  {case_name:<13} mx={facts['mx_order']} null={facts['null_mx']} implicit={facts['implicit_mx']} "
+            f"accepted={facts['mail_accepted']} spf_records={facts['spf_records']} terms={facts.get('spf_terms')} "
+            f"lookups={facts.get('spf_lookups')} all={facts.get('spf_all_qualifier')} all_last={facts.get('spf_all_last')} "
+            f"includes={facts.get('spf_includes')} redirect={facts.get('spf_redirect')} unknown={facts.get('spf_unknown')} "
+            f"exceeds={facts.get('spf_exceeds')}"
+        )
+        if "dmarc_policy" in facts:
+            lines.append(
+                f"                dmarc p={facts['dmarc_policy']} sp={facts['dmarc_sp']} pct={facts['dmarc_pct']} "
+                f"rua={facts['dmarc_rua']} ruf={facts['dmarc_ruf']} version_first={facts['dmarc_version_first']} "
+                f"duplicates={facts['dmarc_duplicates']}"
+            )
+        lines.append(f"                dkim={facts['dkim']}")
+        lines.append(f"                findings={facts['findings']}")
     if checks is not None:
         lines.append("")
         lines.append(f"[--check] {total} verification(s): " + ("ALL PASS" if not checks else f"{len(checks)} FAILURE(S)"))
@@ -498,6 +858,23 @@ def run_checks() -> tuple[int, list[str]]:
     for base, location, resolved in derive_redirect_joins():
         expect(f"redirect {base!r} + {location!r}", resolved, next(published for b, l, published in REDIRECT_JOIN_CASES if b == base and l == location))
     problems.extend(http_invariants())
+    problems.extend(email_invariants())
+    # The two fixtures that carry the interesting SPF facts must actually
+    # produce them — a green check over fixtures that silently parse nothing
+    # would be the same false pass this oracle exists to prevent.
+    healthy = email_facts("healthy")
+    expect("email/healthy lookups", healthy["spf_lookups"], 4)
+    expect("email/healthy all", healthy["spf_all_qualifier"], "-")
+    expect("email/healthy findings", healthy["findings"], ["dmarc-pct-partial"])
+    permissive = email_facts("permissive")
+    expect("email/permissive lookups", permissive["spf_lookups"], 11)
+    expect("email/permissive exceeds", permissive["spf_exceeds"], True)
+    expect("email/permissive findings", permissive["findings"], ["spf-multiple", "spf-too-many-lookups", "spf-permissive", "dmarc-policy-none", "dkim-not-checked"])
+    # A name that resolves to nothing at all is a different diagnosis from an
+    # unset MX, so the fixture set must keep both outcomes apart.
+    expect("email/nxdomain findings", email_facts("nxdomain")["findings"], ["domain-not-found", "spf-missing", "dmarc-missing", "dkim-not-checked"])
+    expect("email/no-mx accepts mail", email_facts("no-mx")["mail_accepted"], True)
+    expect("email/null-mx refuses mail", email_facts("null-mx")["mail_accepted"], False)
     return total, problems
 
 

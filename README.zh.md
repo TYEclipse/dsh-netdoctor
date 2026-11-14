@@ -1,6 +1,6 @@
 # dsh-netdoctor 🩺 网络诊断工具箱
 
-DeepSeek Harness (dsh) 插件：9 个只读网络探针，**零运行时依赖**（仅 Node.js 内置模块）。
+DeepSeek Harness (dsh) 插件：10 个只读网络探针，**零运行时依赖**（仅 Node.js 内置模块）。
 
 让 Agent 直接排查常见网络问题——"服务器连不上？端口通不通？证书何时过期？公共 DNS 返回了什么？域名是谁注册的、何时到期？"——而不必猜测或绕道 shell 命令。
 
@@ -10,6 +10,7 @@ DeepSeek Harness (dsh) 插件：9 个只读网络探针，**零运行时依赖**
 |------|------|------|
 | `dns_lookup` | 查询 A / AAAA / CNAME / MX / TXT / NS / SOA / SRV / PTR / CAA 记录，可指定自定义 DNS 服务器（验证解析生效情况） | `node:dns` |
 | `dns_propagation` | 用多个公共解析器并行查询同一条记录，报告哪些解析器一致、哪些不同——按记录内容分组，「6 个里 4 个一致」由数据实算；失败或超时的解析器如实报失败，不并进多数票 | `node:dns` |
+| `email_dns` | 只用 DNS 判断邮件是否可用：MX 记录（含 null MX「0 .」信号与 RFC 5321 的 A/AAAA 兜底）、SPF 记录拆成逐条机制并给出 DNS 查询数（RFC 7208 每次评估上限 10）与结尾 `all` 限定符、`_dmarc.<域名>` 的 DMARC 标签（`p` / `sp` / `pct` / `rua` / `ruf`），以及你指定的 DKIM 选择器。问题按严重度分级返回：查不到记录就说查不到，查询失败就说查询失败 | `node:dns` |
 | `ping_host` | ICMP ping，报告丢包率与 min/avg/max 往返时延 | 系统 `ping` |
 | `check_port` | TCP 连接探测：**开放 / 关闭 / 被过滤 / 不可达**，含连接耗时 | `node:net` |
 | `check_tls` | 真实 TLS 握手；报告协议、加密套件、证书主体/签发者、有效期、**剩余天数**、SAN、SHA-256 指纹（只检查不信任，可诊断自签名/过期证书） | `node:tls` |

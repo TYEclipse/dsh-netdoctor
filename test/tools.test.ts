@@ -36,9 +36,9 @@ describe('resolveConfig', () => {
 describe('buildNetdoctorTools', () => {
   const tools = buildNetdoctorTools(resolveConfig({}))
 
-  it('exposes all nine probes under their canonical names', () => {
+  it('exposes all ten probes under their canonical names', () => {
     expect(Object.keys(tools).sort()).toEqual(
-      ['check_http', 'check_port', 'check_tls', 'dns_lookup', 'dns_propagation', 'my_ip', 'ping_host', 'trace_route', 'whois'].sort(),
+      ['check_http', 'check_port', 'check_tls', 'dns_lookup', 'dns_propagation', 'email_dns', 'my_ip', 'ping_host', 'trace_route', 'whois'].sort(),
     )
   })
 

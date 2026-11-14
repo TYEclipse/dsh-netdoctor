@@ -2,6 +2,10 @@
 
 > 版本口径：patch 修 bug/补测试｜minor 新增用户可见功能｜major 破坏性变更。安装：`dsh plugin --profile web add github:TYEclipse/dsh-netdoctor`
 
+## [0.5.0] — 2026-11-15
+### Minor · R100
+- [自主进化] R100 新增 email_dns（MX/null MX、SPF 查询预算、DMARC 标签、DKIM 选择器）
+
 ## [0.4.0] — 2026-10-26
 ### Minor · R80
 - [自主进化] R80 新增 check_http（HTTP(S) 端点检查：跳转链 + 分阶段计时 + 审计型响应头 + 有界正文读取）

@@ -1,6 +1,6 @@
 # dsh-netdoctor 🩺
 
-Network diagnostics toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) — nine read-only probes, **zero runtime dependencies** (Node.js built-ins only).
+Network diagnostics toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) — ten read-only probes, **zero runtime dependencies** (Node.js built-ins only).
 
 When your agent needs to answer *"why can't I reach this server?"*, *"which layer is slow?"*, *"is the port open?"*, *"when does this certificate expire?"*, *"what does the public DNS actually return?"* or *"who owns this domain and when does it expire?"* — instead of guessing or fumbling through shell commands, it can call these tools directly and read structured results.
 
@@ -12,6 +12,7 @@ When your agent needs to answer *"why can't I reach this server?"*, *"which laye
 |------|--------------|---------|
 | `dns_lookup` | Query A / AAAA / CNAME / MX / TXT / NS / SOA / SRV / PTR / CAA records, optionally against a custom nameserver (great for testing DNS propagation) | `node:dns` |
 | `dns_propagation` | Query one record through several public resolvers in parallel and report where they agree and where they differ — answers are grouped by record content, so "4 of 6 agree" is counted from the data; failed or slow resolvers are reported as failed rather than folded into the majority | `node:dns` |
+| `email_dns` | Mail readiness from DNS alone: MX records (including the null-MX "0 ." signal and the RFC 5321 A/AAAA fallback), the SPF record parsed into mechanisms with its DNS-lookup budget (10 per evaluation, RFC 7208) and final `all` qualifier, the DMARC record at `_dmarc.<domain>` parsed into tags (`p` / `sp` / `pct` / `rua` / `ruf`), and any DKIM selectors you name. Problems come back as severity-coded findings; a record that is missing is reported as missing and a lookup that failed is reported as failed | `node:dns` |
 | `ping_host` | ICMP ping with packet-loss and min/avg/max RTT summary | system `ping` |
 | `check_port` | TCP connect probe: **open / closed / filtered / unreachable** with connect time | `node:net` |
 | `check_tls` | Real TLS handshake; reports protocol, cipher, cert subject/issuer, validity window, **days to expiry**, SANs, SHA-256 fingerprint. Certificates are inspected but never trusted, so expired/self-signed certs can be diagnosed | `node:tls` |

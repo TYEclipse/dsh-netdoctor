@@ -15,6 +15,7 @@ import { traceRoute } from "./route.js";
 import { whoisLookup } from "./whois.js";
 import { dnsPropagation } from "./propagation.js";
 import { checkHttp, DEFAULT_BODY_LIMIT_BYTES, DEFAULT_MAX_REDIRECTS } from "./http.js";
+import { emailDns, MAX_DKIM_SELECTORS } from "./email.js";
 const DNS_RECORDS = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'SRV', 'PTR', 'CAA'];
 function renderDns(value) {
     const result = value;
@@ -156,7 +157,62 @@ function renderWhois(value) {
         lines.push(`  nameservers: ${summary.nameServers.join(', ')}`);
     return lines.join('\n');
 }
-/** Build all seven tool definitions from the resolved config. */
+function renderEmail(value) {
+    const result = value;
+    const lines = [];
+    if (result.nullMx) {
+        lines.push(`email DNS for ${result.domain}: mail is not accepted (null MX "0 .")`);
+    }
+    else if (result.mx.length > 0) {
+        lines.push(`email DNS for ${result.domain}: ${result.mx.length} MX record(s)`);
+        for (const record of result.mx)
+            lines.push(`  ${record.priority} ${record.exchange}`);
+    }
+    else {
+        lines.push(`email DNS for ${result.domain}: no MX records${result.implicitMx ? ' (A/AAAA fallback)' : ''}`);
+        for (const address of result.fallbackAddresses)
+            lines.push(`  ${address} [implicit MX]`);
+    }
+    const spf = result.spf;
+    if (spf.found) {
+        const verdict = spf.allQualifier === undefined ? 'no all mechanism' : `${spf.allQualifier}all`;
+        lines.push(`  spf: ${spf.selected ?? ''}`);
+        lines.push(`    ${spf.dnsLookups}/${spf.lookupLimit} DNS-querying terms at this level, ${verdict}${spf.includes.length > 0 ? `, includes: ${spf.includes.join(', ')}` : ''}`);
+    }
+    else {
+        lines.push(`  spf: ${spf.error === undefined ? 'none' : `lookup failed — ${spf.error}`}`);
+    }
+    const dmarc = result.dmarc;
+    if (dmarc.found) {
+        const extras = [];
+        if (dmarc.percentage !== undefined)
+            extras.push(`pct=${dmarc.percentage}`);
+        if (dmarc.reportingUris.length > 0)
+            extras.push(`rua ${dmarc.reportingUris.length}`);
+        lines.push(`  dmarc: p=${dmarc.policy ?? '(missing)'}${extras.length > 0 ? ` (${extras.join(', ')})` : ''}${dmarc.usable ? '' : ' [record not usable]'}`);
+    }
+    else {
+        lines.push(`  dmarc: ${dmarc.error === undefined ? 'none' : `lookup failed — ${dmarc.error}`}`);
+    }
+    for (const report of result.dkim) {
+        const state = report.error !== undefined
+            ? `lookup failed — ${report.error}`
+            : report.found
+                ? `${report.keyType === undefined ? 'key present' : `${report.keyType} key present`}${report.revoked ? ' (revoked)' : ''}`
+                : 'no key';
+        lines.push(`  dkim ${report.selector}: ${state}`);
+    }
+    if (result.findings.length > 0) {
+        const marks = { error: '✗', warning: '⚠️', info: 'ℹ️' };
+        lines.push('  findings:');
+        for (const finding of result.findings)
+            lines.push(`    ${marks[finding.severity] ?? '-'} ${finding.code}: ${finding.message}`);
+    }
+    if (result.note !== undefined)
+        lines.push(`  note: ${result.note}`);
+    return lines.join('\n');
+}
+/** Build all ten tool definitions from the resolved config. */
 export function buildNetdoctorTools(config) {
     const dns_lookup = defineTool({
         name: 'dns_lookup',
@@ -532,6 +588,129 @@ export function buildNetdoctorTools(config) {
             return whoisLookup(args.domain, args.server, config.whoisTimeoutMs);
         },
     });
-    return { dns_lookup, dns_propagation, ping_host, check_port, check_tls, check_http, trace_route, my_ip, whois };
+    const email_dns = defineTool({
+        name: 'email_dns',
+        description: 'Check whether a domain is set up to send and receive mail, using DNS only: MX records (including the '
+            + 'null-MX "0 ." signal that a domain accepts no mail, and the RFC 5321 A/AAAA fallback when MX is absent), the '
+            + 'SPF record parsed into mechanisms with its DNS-lookup budget (RFC 7208 counts at most 10 per evaluation) and '
+            + 'final "all" qualifier, the DMARC record at _dmarc.<domain> parsed into tags (p / sp / pct / rua / ruf), and any '
+            + 'DKIM selectors you name. Every problem is returned as a severity-coded finding instead of a boolean, and a '
+            + 'failed lookup is reported as a failure rather than as "no records". Read-only.',
+        parameters: {
+            domain: { type: 'string', required: true, description: 'Domain to check, e.g. "example.com" (the domain itself, not an address).' },
+            dkimSelectors: {
+                type: 'array',
+                items: { type: 'string' },
+                description: `Selectors to probe at <selector>._domainkey.<domain> (at most ${MAX_DKIM_SELECTORS}). Selectors cannot be `
+                    + 'discovered via DNS — take one from a message header "s=" tag or from your provider\'s docs.',
+            },
+        },
+        output: {
+            schema: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                    domain: { type: 'string', required: true },
+                    mailAccepted: { type: 'boolean', required: true },
+                    mx: {
+                        type: 'array',
+                        required: true,
+                        items: {
+                            type: 'object',
+                            additionalProperties: false,
+                            properties: {
+                                exchange: { type: 'string', required: true },
+                                priority: { type: 'number', required: true },
+                            },
+                        },
+                    },
+                    nullMx: { type: 'boolean', required: true },
+                    implicitMx: { type: 'boolean', required: true },
+                    fallbackAddresses: { type: 'array', required: true, items: { type: 'string' } },
+                    mxError: { type: 'string' },
+                    spf: {
+                        type: 'object',
+                        required: true,
+                        additionalProperties: false,
+                        properties: {
+                            found: { type: 'boolean', required: true },
+                            records: { type: 'array', required: true, items: { type: 'string' } },
+                            selected: { type: 'string' },
+                            multiple: { type: 'boolean', required: true },
+                            terms: { type: 'array', required: true, items: { type: 'string' } },
+                            dnsLookups: { type: 'number', required: true },
+                            lookupLimit: { type: 'number', required: true },
+                            exceedsLimit: { type: 'boolean', required: true },
+                            allQualifier: { type: 'string' },
+                            allIsLast: { type: 'boolean', required: true },
+                            includes: { type: 'array', required: true, items: { type: 'string' } },
+                            redirect: { type: 'string' },
+                            unknownTerms: { type: 'array', required: true, items: { type: 'string' } },
+                            error: { type: 'string' },
+                        },
+                    },
+                    dmarc: {
+                        type: 'object',
+                        required: true,
+                        additionalProperties: false,
+                        properties: {
+                            found: { type: 'boolean', required: true },
+                            name: { type: 'string', required: true },
+                            records: { type: 'array', required: true, items: { type: 'string' } },
+                            selected: { type: 'string' },
+                            usable: { type: 'boolean', required: true },
+                            versionFirst: { type: 'boolean', required: true },
+                            tags: { type: 'object', required: true, additionalProperties: true },
+                            policy: { type: 'string' },
+                            subdomainPolicy: { type: 'string' },
+                            percentage: { type: 'number' },
+                            reportingUris: { type: 'array', required: true, items: { type: 'string' } },
+                            forensicUris: { type: 'array', required: true, items: { type: 'string' } },
+                            duplicateTags: { type: 'array', required: true, items: { type: 'string' } },
+                            error: { type: 'string' },
+                        },
+                    },
+                    dkim: {
+                        type: 'array',
+                        required: true,
+                        items: {
+                            type: 'object',
+                            additionalProperties: false,
+                            properties: {
+                                selector: { type: 'string', required: true },
+                                name: { type: 'string', required: true },
+                                found: { type: 'boolean', required: true },
+                                revoked: { type: 'boolean', required: true },
+                                keyType: { type: 'string' },
+                                error: { type: 'string' },
+                            },
+                        },
+                    },
+                    findings: {
+                        type: 'array',
+                        required: true,
+                        items: {
+                            type: 'object',
+                            additionalProperties: false,
+                            properties: {
+                                severity: { type: 'string', required: true, enum: ['error', 'warning', 'info'] },
+                                code: { type: 'string', required: true },
+                                message: { type: 'string', required: true },
+                            },
+                        },
+                    },
+                    note: { type: 'string' },
+                },
+            },
+            render: (_args, value) => [{ type: 'text', text: renderEmail(value) }],
+        },
+        async execute(args) {
+            const options = {};
+            if (args.dkimSelectors !== undefined)
+                options.dkimSelectors = args.dkimSelectors;
+            return emailDns(args.domain, options);
+        },
+    });
+    return { dns_lookup, dns_propagation, email_dns, ping_host, check_port, check_tls, check_http, trace_route, my_ip, whois };
 }
 //# sourceMappingURL=tools.js.map

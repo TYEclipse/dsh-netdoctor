@@ -1,9 +1,10 @@
 /**
  * dsh-netdoctor — network diagnostics toolbox for DeepSeek Harness.
  *
- * Eight read-only probes, zero runtime dependencies (node built-ins only):
+ * Ten read-only probes, zero runtime dependencies (node built-ins only):
  *   dns_lookup      — DNS records (A/AAAA/CNAME/MX/TXT/NS/SOA/SRV/PTR/CAA), optional custom nameserver
  *   dns_propagation — one record across several public resolvers, with agreement/difference reporting
+ *   email_dns       — mail readiness: MX / null MX, SPF lookup budget, DMARC tags, DKIM selectors
  *   ping_host       — ICMP ping via the system ping utility, parsed summary
  *   check_port      — TCP connect probe: open / closed / filtered
  *   check_tls       — TLS handshake + leaf certificate identity, validity, days to expiry

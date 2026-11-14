@@ -10,6 +10,7 @@ import type { ResolvedConfig } from './index.ts';
 export interface ToolSet {
     dns_lookup: ToolDefinition;
     dns_propagation: ToolDefinition;
+    email_dns: ToolDefinition;
     ping_host: ToolDefinition;
     check_port: ToolDefinition;
     check_tls: ToolDefinition;
@@ -18,6 +19,6 @@ export interface ToolSet {
     my_ip: ToolDefinition;
     whois: ToolDefinition;
 }
-/** Build all seven tool definitions from the resolved config. */
+/** Build all ten tool definitions from the resolved config. */
 export declare function buildNetdoctorTools(config: ResolvedConfig): ToolSet;
 //# sourceMappingURL=tools.d.ts.map
